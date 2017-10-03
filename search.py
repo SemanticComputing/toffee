@@ -12,12 +12,21 @@ from googleapiclient.discovery import build
 
 
 class RFSearch:
+    """
+    Relevance-feedback search using Google Custom Search.
+    """
 
     def __init__(self, apikey, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
         self.arpa_url = arpa_url
         self.search_service = build("customsearch", "v1", developerKey=apikey)
 
     def expand_words(self, words):
+        """
+        ARPA query expansion using related items from KOKO ontology.
+
+        :param words: list of words
+        :return: list of tuples containing words with their related words
+        """
         expanded = []
         for word in words:
             data = {'text': word}
@@ -27,12 +36,17 @@ class RFSearch:
             related = [item for sublist in related for item in set(sublist)]
             related = [x if ' ' in x else x.strip('"') for x in related]
 
-            # print('Related concepts: %s' % (len(related)))
             expanded.append(tuple(set(related + [word])))
 
         return expanded
 
     def search(self, words):
+        """
+        Create a search query based on a list of words and query for results.
+
+        :param words:
+        :return:
+        """
         print('Querying ARPA')
         expanded_words = self.expand_words(words)
         print('Expanded from %s words to %s words' % (len(words), len([x for y in expanded_words for x in y])))
