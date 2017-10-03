@@ -1,50 +1,68 @@
 #!/usr/bin/env python3
-#  -*- coding: UTF-8 -*-
+# -*- coding: UTF-8 -*-
 """
 Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
 import pprint
 
+import pickle
 from arpa_linker.arpa import post
 from googleapiclient.discovery import build
 
 
-def expand_words(words, url='http://demo.seco.tkk.fi/arpa/koko-related'):
-    expanded = []
-    for word in words:
-        data = {'text': word}
-        query_result = post(url, data, retries=5)
+class RFSearch:
 
-        related = [match['properties'].get('relatedlabel', '') for match in query_result['results']]
-        related = [item for sublist in related for item in set(sublist)]
-        related = [x if ' ' in x else x.strip('"') for x in related]
+    def __init__(self, apikey, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
+        self.arpa_url = arpa_url
+        self.search_service = build("customsearch", "v1", developerKey=apikey)
 
-        # print('Related concepts: %s' % (len(related)))
-        expanded.append(tuple(set(related + [word])))
+    def expand_words(self, words):
+        expanded = []
+        for word in words:
+            data = {'text': word}
+            query_result = post(self.arpa_url, data, retries=5, wait=5)
 
-    return expanded
+            related = [match['properties'].get('relatedlabel', '') for match in query_result['results']]
+            related = [item for sublist in related for item in set(sublist)]
+            related = [x if ' ' in x else x.strip('"') for x in related]
 
-argparser = argparse.ArgumentParser(description="Process war prisoners CSV", fromfile_prefix_chars='@')
-argparser.add_argument("apikey", help="Google API key")
-argparser.add_argument('words', metavar='N', type=str, nargs='+', help='search words')
-args = argparser.parse_args()
+            # print('Related concepts: %s' % (len(related)))
+            expanded.append(tuple(set(related + [word])))
 
-apikey = args.apikey
-search_words = args.words
+        return expanded
 
-print('Querying ARPA')
-expanded_words = expand_words(search_words)
-print('Expanded from %s words to %s words' % (len(search_words), len([x for y in expanded_words for x in y])))
-query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
-print(query)
+    def search(self, words):
+        print('Querying ARPA')
+        expanded_words = self.expand_words(words)
+        print('Expanded from %s words to %s words' % (len(words), len([x for y in expanded_words for x in y])))
+        query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
+        print('Query:')
+        print(query)
 
-service = build("customsearch", "v1", developerKey=apikey)
+        res = self.search_service.cse().list(
+            q=' '.join(words),
+            cx='012121639191539030590:cshq4wzc7ms',
+            # excludeTerms='foo'
+        ).execute()
 
-res = service.cse().list(
-    q=' '.join(search_words),
-    cx='012121639191539030590:cshq4wzc7ms',
-    # excludeTerms='foo'
-).execute()
-items = res.get('items')
-pprint.pprint(items)
+        return res
+
+if __name__ == "__main__":
+    argparser = argparse.ArgumentParser(description="Process war prisoners CSV", fromfile_prefix_chars='@')
+    argparser.add_argument("apikey", help="Google API key")
+    argparser.add_argument('words', metavar='N', type=str, nargs='+', help='search words')
+    args = argparser.parse_args()
+
+    apikey = args.apikey
+    search_words = args.words
+
+    searcher = RFSearch(apikey)
+
+    res = searcher.search(search_words)
+    items = res.get('items')
+    if items:
+        pprint.pprint(items)
+        pickle.dump(res, open('results.pkl', 'wb'))
+    else:
+        print(res)
