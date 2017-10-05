@@ -76,7 +76,9 @@ if __name__ == "__main__":
     res = searcher.search(search_words)
     items = res.get('items')
     if items:
-        pprint.pprint(items)
+        print('Got %s results' % res.get('searchInformation').get('totalResults'))
+        # pprint.pprint(items)
         pickle.dump(res, open('results.pkl', 'wb'))
+        print('Results saved to file.')
     else:
         print(res)
