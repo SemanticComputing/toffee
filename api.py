@@ -4,26 +4,30 @@
 Relevance feedback search API.
 """
 import argparse
-import pprint
 
 from flask import Flask, request, json
+from flask_cors import CORS
 
 from search import RFSearch
 
 app = Flask(__name__)
+CORS(app)
 
 @app.route('/')
 def hello():
     return "Hello World!"
 
-@app.route('/search')
+@app.route('/search', methods = ['GET', 'POST'])
 def search():
-    words = request.args.get('words', default='', type=str)
-    print('Search API got words: %s' % words)
-    res = searcher.search(words.split())
-    print('Got %s results' % res.get('searchInformation').get('totalResults'))
-    items = res.get('items')
-    return json.dumps(items)
+    query = request.values.get('query')
+    print('Search API got words: %s' % query)
+    if query:
+        res = searcher.search(query.split())
+        print('Got %s results' % res.get('searchInformation').get('totalResults'))
+        items = res.get('items')
+        return json.dumps(items)
+
+    return ''
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description="Process war prisoners CSV", fromfile_prefix_chars='@')
