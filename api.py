@@ -8,7 +8,7 @@ import argparse
 from flask import Flask, request, json
 from flask_cors import CORS
 
-from search import RFSearch
+from search import RFSearch_GoogleAPI
 
 app = Flask(__name__)
 CORS(app)
@@ -34,6 +34,6 @@ if __name__ == "__main__":
     argparser.add_argument("apikey", help="Google API key")
     args = argparser.parse_args()
 
-    searcher = RFSearch(args.apikey)
+    searcher = RFSearch_GoogleAPI(args.apikey)
 
     app.run()

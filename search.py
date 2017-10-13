@@ -13,12 +13,23 @@ from googleapiclient.discovery import build
 
 class RFSearch:
     """
-    Relevance-feedback search using Google Custom Search.
+    Relevance-feedback search abstract class.
     """
 
-    def __init__(self, apikey, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
+    def __init__(self):
+        pass
+
+    def search(self, words):
+        pass
+
+
+class SearchExpanderArpa:
+    """
+    Search expander class using ARPA.
+    """
+
+    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
         self.arpa_url = arpa_url
-        self.search_service = build("customsearch", "v1", developerKey=apikey)
 
     def expand_words(self, words):
         """
@@ -39,6 +50,17 @@ class RFSearch:
             expanded.append(tuple(set(related + [word])))
 
         return expanded
+
+
+class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
+    """
+    Relevance-feedback search using Google Custom Search.
+    """
+
+    def __init__(self, apikey, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
+        RFSearch.__init__(self)
+        SearchExpanderArpa.__init__(self, arpa_url=arpa_url)
+        self.search_service = build("customsearch", "v1", developerKey=apikey)
 
     def search(self, words):
         """
@@ -63,7 +85,7 @@ class RFSearch:
         return res
 
 if __name__ == "__main__":
-    argparser = argparse.ArgumentParser(description="Process war prisoners CSV", fromfile_prefix_chars='@')
+    argparser = argparse.ArgumentParser(description="Search CLI", fromfile_prefix_chars='@')
     argparser.add_argument("apikey", help="Google API key")
     argparser.add_argument('words', metavar='N', type=str, nargs='+', help='search words')
     args = argparser.parse_args()
@@ -71,7 +93,7 @@ if __name__ == "__main__":
     apikey = args.apikey
     search_words = args.words
 
-    searcher = RFSearch(apikey)
+    searcher = RFSearch_GoogleAPI(apikey)
 
     res = searcher.search(search_words)
     items = res.get('items')
