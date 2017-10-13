@@ -9,6 +9,7 @@ import pprint
 import pickle
 from arpa_linker.arpa import post
 from googleapiclient.discovery import build
+from google import google
 
 
 class RFSearch:
@@ -77,10 +78,39 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         print(query)
 
         res = self.search_service.cse().list(
-            q=' '.join(words),
+            q=query,
             cx='012121639191539030590:cshq4wzc7ms',
             # excludeTerms='foo'
         ).execute()
+
+        return res
+
+
+class RFSearch_GoogleUI(RFSearch, SearchExpanderArpa):
+    """
+    Relevance-feedback search using Google Custom Search.
+    """
+
+    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
+        RFSearch.__init__(self)
+        SearchExpanderArpa.__init__(self, arpa_url=arpa_url)
+        self.num_results = 10
+
+    def search(self, words):
+        """
+        Create a search query based on a list of words and query for results.
+
+        :param words:
+        :return:
+        """
+        print('Querying ARPA')
+        expanded_words = self.expand_words(words)
+        print('Expanded from %s words to %s words' % (len(words), len([x for y in expanded_words for x in y])))
+        query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
+        print('Query:')
+        print(query)
+
+        res = google.search(query, self.num_results)
 
         return res
 
