@@ -13,11 +13,13 @@ from search import RFSearch_GoogleAPI
 app = Flask(__name__)
 CORS(app)
 
+
 @app.route('/')
 def hello():
-    return "Hello World!"
+    return __doc__
 
-@app.route('/search', methods = ['GET', 'POST'])
+
+@app.route('/search', methods=['GET', 'POST'])
 def search():
     query = request.values.get('query')
     print('Search API got words: %s' % query)
@@ -29,8 +31,9 @@ def search():
 
     return ''
 
+
 if __name__ == "__main__":
-    argparser = argparse.ArgumentParser(description="Process war prisoners CSV", fromfile_prefix_chars='@')
+    argparser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars='@')
     argparser.add_argument("apikey", help="Google API key")
     args = argparser.parse_args()
 
