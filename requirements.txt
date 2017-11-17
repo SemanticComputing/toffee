@@ -1,6 +1,5 @@
 google-api-python-client>=1.6.3
 Flask>=0.12.2
 Flask-Cors>=3.0.3
-selenium>=3.7.0
 git+https://github.com/SemanticComputing/python-arpa-linker.git#egg=arpa_linker-master
 git+https://github.com/abenassi/Google-Search-API/

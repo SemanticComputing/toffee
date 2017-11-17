@@ -8,7 +8,10 @@ import argparse
 from arpa_linker.arpa import post
 from google import google
 from googleapiclient.discovery import build
-from selenium import webdriver
+
+from sklearn.feature_extraction.text import CountVectorizer
+import numpy as np
+import lda
 
 
 class RFSearch:
@@ -91,6 +94,8 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         # else:
         #     print(res)
 
+        # TODO: Get more result pages
+
         sanitized = []
         for item in items:
             sanitized.append({'name': item['title'], 'url': item['link'], 'description': item['snippet']})
@@ -138,8 +143,6 @@ if __name__ == "__main__":
     argparser.add_argument('words', metavar='Keywords', type=str, nargs='+', help='search keywords')
     args = argparser.parse_args()
 
-    browser = webdriver.Firefox()
-
     engines = {'GoogleAPI': RFSearch_GoogleAPI,
                'GoogleUI': RFSearch_GoogleUI,
                }
@@ -153,11 +156,30 @@ if __name__ == "__main__":
         params.update({'apikey': apikey})
     searcher = engines[engine](**params)
 
-    res = searcher.search(search_words)
+    with open('stopwords.txt', 'r') as f:
+        stopwords = f.read().split()
 
-    # for result in res:
-    #     print(result)
+    res = searcher.search(search_words)
 
     print(len(res))
     print(res[0])
+
+    # TODO: Use dryscrape to get page contents
+
+    vectorizer = CountVectorizer(stop_words=stopwords)
+    data_corpus = (r['description'] for r in res)
+    X = vectorizer.fit_transform(data_corpus)
+    vocab = vectorizer.get_feature_names()
+
+    print(vocab)
+    print(X.toarray())
+
+    model = lda.LDA(n_topics=len(res) // 2, n_iter=1500, random_state=1)
+    model.fit(X)
+    topic_word = model.topic_word_
+    n_top_words = 8
+
+    for i, topic_dist in enumerate(topic_word):
+        topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
+        print('Topic {}: {}'.format(i, ' '.join(topic_words)))
 
