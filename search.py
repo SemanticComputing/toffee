@@ -4,12 +4,11 @@
 Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
-import pprint
 
-import pickle
 from arpa_linker.arpa import post
-from googleapiclient.discovery import build
 from google import google
+from googleapiclient.discovery import build
+from selenium import webdriver
 
 
 class RFSearch:
@@ -58,7 +57,7 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, apikey, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
+    def __init__(self, apikey='', arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
         RFSearch.__init__(self)
         SearchExpanderArpa.__init__(self, arpa_url=arpa_url)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
@@ -83,7 +82,20 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
             # excludeTerms='foo'
         ).execute()
 
-        return res
+        items = res.get('items')
+        if items:
+            print('Got %s results' % res.get('searchInformation').get('totalResults'))
+            # pprint.pprint(items)
+        #     pickle.dump(res, open('results.pkl', 'wb'))
+        #     print('Results saved to file.')
+        # else:
+        #     print(res)
+
+        sanitized = []
+        for item in items:
+            sanitized.append({'name': item['title'], 'url': item['link'], 'description': item['snippet']})
+
+        return sanitized
 
 
 class RFSearch_GoogleUI(RFSearch, SearchExpanderArpa):
@@ -112,25 +124,40 @@ class RFSearch_GoogleUI(RFSearch, SearchExpanderArpa):
 
         res = google.search(query, self.num_results)
 
-        return res
+        sanitized = []
+        for item in res:
+            sanitized.append({'name': item.name, 'url': item.link, 'description': item.description})
+
+        return sanitized
+
 
 if __name__ == "__main__":
-    argparser = argparse.ArgumentParser(description="Search CLI", fromfile_prefix_chars='@')
-    argparser.add_argument("apikey", help="Google API key")
-    argparser.add_argument('words', metavar='N', type=str, nargs='+', help='search words')
+    argparser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars='@')
+    argparser.add_argument("--engine", help="Search engine", default='GoogleAPI', choices=["GoogleAPI", "GoogleUI"])
+    argparser.add_argument("--apikey", help="Google API key")
+    argparser.add_argument('words', metavar='Keywords', type=str, nargs='+', help='search keywords')
     args = argparser.parse_args()
+
+    browser = webdriver.Firefox()
+
+    engines = {'GoogleAPI': RFSearch_GoogleAPI,
+               'GoogleUI': RFSearch_GoogleUI,
+               }
 
     apikey = args.apikey
     search_words = args.words
+    engine = args.engine
 
-    searcher = RFSearch_GoogleAPI(apikey)
+    params = {}
+    if apikey:
+        params.update({'apikey': apikey})
+    searcher = engines[engine](**params)
 
     res = searcher.search(search_words)
-    items = res.get('items')
-    if items:
-        print('Got %s results' % res.get('searchInformation').get('totalResults'))
-        # pprint.pprint(items)
-        pickle.dump(res, open('results.pkl', 'wb'))
-        print('Results saved to file.')
-    else:
-        print(res)
+
+    # for result in res:
+    #     print(result)
+
+    print(len(res))
+    print(res[0])
+
