@@ -5,14 +5,14 @@ Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
 
-import pickle
+import dryscrape
+import lda
+import numpy as np
 from arpa_linker.arpa import post
 from google import google
 from googleapiclient.discovery import build
-
 from sklearn.feature_extraction.text import CountVectorizer
-import numpy as np
-import lda
+from webkit_server import EndOfStreamError
 
 
 class RFSearch:
@@ -189,13 +189,31 @@ if __name__ == "__main__":
     print(res[0])
     print()
 
+    dryscrape.start_xvfb()
+
     for r in res:
         print('%s:  %s' % (r['name'], r['url']))
 
-    # TODO: Use dryscrape to get page contents
+        try:
+            # set up a web scraping session
+            sess = dryscrape.Session(base_url=r['url'])
+            sess.set_attribute('auto_load_images', False)
+
+            # visit page
+            sess.visit('/')
+        except (EndOfStreamError, ConnectionResetError, ConnectionRefusedError):
+            print()
+            continue
+
+        q = sess.at_xpath('//text()')
+
+        # extract all text
+        body_text = sess.xpath('//body')[0].text()
+
+        r['contents'] = body_text
 
     vectorizer = CountVectorizer(stop_words=stopwords)
-    data_corpus = (r['description'] for r in res)
+    data_corpus = (r.get('contents', '') for r in res)
     X = vectorizer.fit_transform(data_corpus)
     vocab = vectorizer.get_feature_names()
 
@@ -210,4 +228,3 @@ if __name__ == "__main__":
     for i, topic_dist in enumerate(topic_word):
         topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
         print('Topic {}: {}'.format(i, ' '.join(topic_words)))
-

@@ -3,3 +3,4 @@ Flask>=0.12.2
 Flask-Cors>=3.0.3
 git+https://github.com/SemanticComputing/python-arpa-linker.git#egg=arpa_linker-master
 git+https://github.com/abenassi/Google-Search-API/
+dryscrape>=1.0
