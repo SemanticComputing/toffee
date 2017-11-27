@@ -5,6 +5,7 @@ Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
 
+import pickle
 from arpa_linker.arpa import post
 from google import google
 from googleapiclient.discovery import build
@@ -82,19 +83,40 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         res = self.search_service.cse().list(
             q=query,
             cx='012121639191539030590:cshq4wzc7ms',
+            num=10,
+            start=1,
             # excludeTerms='foo'
         ).execute()
 
         items = res.get('items')
+        next_page = True  # res.get('nextPage')
+        i = 1
+
+        total_results = int(res.get('searchInformation').get('totalResults'))
         if items:
-            print('Got %s results' % res.get('searchInformation').get('totalResults'))
+            print('Got %s results' % total_results)
             # pprint.pprint(items)
         #     pickle.dump(res, open('results.pkl', 'wb'))
         #     print('Results saved to file.')
         # else:
         #     print(res)
 
-        # TODO: Get more result pages
+        while total_results > 10 and next_page and i < 50:
+            i += 10
+            res = self.search_service.cse().list(
+                q=query,
+                cx='012121639191539030590:cshq4wzc7ms',
+                num=10,
+                start=i,
+            ).execute()
+
+            new_items = res.get('items')
+
+            if new_items:
+                items += new_items
+
+            else:
+                next_page = False
 
         sanitized = []
         for item in items:
@@ -160,9 +182,15 @@ if __name__ == "__main__":
         stopwords = f.read().split()
 
     res = searcher.search(search_words)
+    # res = pickle.load(open('google_search_results.pkl', 'rb'))
+    # pickle.dump(res, open('google_search_results.pkl', 'wb'))
 
     print(len(res))
     print(res[0])
+    print()
+
+    for r in res:
+        print('%s:  %s' % (r['name'], r['url']))
 
     # TODO: Use dryscrape to get page contents
 
