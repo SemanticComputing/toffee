@@ -4,3 +4,7 @@ Flask-Cors>=3.0.3
 git+https://github.com/SemanticComputing/python-arpa-linker.git#egg=arpa_linker-master
 git+https://github.com/abenassi/Google-Search-API/
 dryscrape>=1.0
+lda>=1.0.5
+numpy>=1.13.3
+scipy>=1.0.0
+scikit-learn>=0.19.1
