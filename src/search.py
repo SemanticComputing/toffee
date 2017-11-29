@@ -49,6 +49,8 @@ class SearchExpanderArpa:
         :param words: list of words
         :return: list of tuples containing words with their related words
         """
+        log.debug('Querying ARPA')
+
         expanded = []
         for word in words:
             data = {'text': word}
@@ -59,6 +61,8 @@ class SearchExpanderArpa:
             related = [x if ' ' in x else x.strip('"') for x in related]
 
             expanded.append(tuple(set(related + [word])))
+
+        log.info('Expanded from %s words to %s words' % (len(words), len([x for y in expanded for x in y])))
 
         return expanded
 
@@ -80,12 +84,9 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         :param words:
         :return:
         """
-        print('Querying ARPA')
         expanded_words = self.expand_words(words)
-        print('Expanded from %s words to %s words' % (len(words), len([x for y in expanded_words for x in y])))
         query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
-        print('Query:')
-        print(query)
+        log.debug('Query: %s' % query)
 
         res = self.search_service.cse().list(
             q=query,
@@ -101,7 +102,7 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
 
         total_results = int(res.get('searchInformation').get('totalResults'))
         if items:
-            print('Got %s results' % total_results)
+            log.debug('Got %s results' % total_results)
             # pprint.pprint(items)
         #     pickle.dump(res, open('results.pkl', 'wb'))
         #     print('Results saved to file.')
@@ -149,12 +150,9 @@ class RFSearch_GoogleUI(RFSearch, SearchExpanderArpa):
         :param words:
         :return:
         """
-        print('Querying ARPA')
         expanded_words = self.expand_words(words)
-        print('Expanded from %s words to %s words' % (len(words), len([x for y in expanded_words for x in y])))
         query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
-        print('Query:')
-        print(query)
+        log.debug('Query: %s' % query)
 
         res = google.search(query, self.num_results)
 
@@ -174,8 +172,7 @@ if __name__ == "__main__":
                            choices=["NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     args = argparser.parse_args()
 
-    logging.basicConfig(filemode='a',
-                        level=getattr(logging, args.loglevel),
+    logging.basicConfig(level=getattr(logging, args.loglevel),
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     engines = {'GoogleAPI': RFSearch_GoogleAPI,
@@ -194,16 +191,16 @@ if __name__ == "__main__":
     with open('stopwords.txt', 'r') as f:
         stopwords = f.read().split()
 
-    res = searcher.search(search_words)
-    # res = pickle.load(open('google_search_results.pkl', 'rb'))
+    # res = searcher.search(search_words)
+    res = pickle.load(open('google_search_results.pkl', 'rb'))
     # pickle.dump(res, open('google_search_results.pkl', 'wb'))
 
-    print(len(res))
-    print(res[0])
-    print()
+    log.info('Got %s results from search.' % len(res))
+
+    log.info('Scraping results')
 
     for r in res:
-        print('%s:  %s' % (r['name'], r['url']))
+        log.debug('Scraping result %s:  %s' % (r['name'], r['url']))
 
         # Expecting prerender to be running at port 3000
         page = requests.get('http://localhost:3000/' + r['url'])
@@ -211,6 +208,8 @@ if __name__ == "__main__":
         [s.extract() for s in soup(['iframe', 'script', 'style'])]
 
         r['contents'] = soup.get_text()
+
+    log.info('Topic modeling')
 
     vectorizer = CountVectorizer(stop_words=stopwords)
     data_corpus = (r.get('contents', '') for r in res)
@@ -227,4 +226,4 @@ if __name__ == "__main__":
 
     for i, topic_dist in enumerate(topic_word):
         topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
-        print('Topic {}: {}'.format(i, ' '.join(topic_words)))
+        log.info('Topic {}: {}'.format(i, ' '.join(topic_words)))
