@@ -5,7 +5,6 @@ Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
 import logging
-from time import sleep
 import pickle
 
 import lda
@@ -110,15 +109,18 @@ class SearchExpanderArpa:
         return expanded
 
 
-class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
+class RFSearch_GoogleAPI(RFSearch):
     """
     Relevance-feedback search using Google Custom Search.
     """
 
     def __init__(self, apikey='', arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
         RFSearch.__init__(self)
-        SearchExpanderArpa.__init__(self, arpa_url=arpa_url)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
+        if arpa_url:
+            self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
+        else:
+            self.word_expander = lambda words: [(word,) for word in words]
 
     def search(self, words):
         """
@@ -127,9 +129,9 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         :param words:
         :return:
         """
-        expanded_words = self.expand_words(words)
+        expanded_words = self.word_expander(words)
         query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
-        log.debug('Query: %s' % query)
+        log.info('Query: %s' % query)
 
         res = self.search_service.cse().list(
             q=query,
@@ -178,15 +180,18 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         return sanitized
 
 
-class RFSearch_GoogleUI(RFSearch, SearchExpanderArpa):
+class RFSearch_GoogleUI(RFSearch):
     """
     Relevance-feedback search using Google Custom Search.
     """
 
     def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
         RFSearch.__init__(self)
-        SearchExpanderArpa.__init__(self, arpa_url=arpa_url)
         self.num_results = 10
+        if arpa_url:
+            self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
+        else:
+            self.word_expander = lambda words: [(word,) for word in words]
 
     def search(self, words):
         """
@@ -195,9 +200,9 @@ class RFSearch_GoogleUI(RFSearch, SearchExpanderArpa):
         :param words:
         :return:
         """
-        expanded_words = self.expand_words(words)
+        expanded_words = self.word_expander(words)
         query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
-        log.debug('Query: %s' % query)
+        log.info('Query: %s' % query)
 
         res = google.search(query, self.num_results)
 
