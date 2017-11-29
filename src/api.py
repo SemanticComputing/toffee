@@ -35,8 +35,9 @@ def search():
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars='@')
     argparser.add_argument("apikey", help="Google API key")
+    argparser.add_argument("--host", default=None, help="Host (e.g. 0.0.0.0)")
     args = argparser.parse_args()
 
     searcher = RFSearch_GoogleAPI(args.apikey)
 
-    app.run()
+    app.run(host=args.host)
