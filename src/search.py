@@ -31,6 +31,51 @@ class RFSearch:
     def search(self, words):
         pass
 
+    def scrape_contents(self, documents):
+        log.info('Scraping results')
+
+        for doc in documents:
+            log.debug('Scraping document %s:  %s' % (doc['name'], doc['url']))
+
+            # Expecting prerender to be running at port 3000
+            page = requests.get('http://localhost:3000/' + doc['url'])
+            soup = BeautifulSoup(page.text, 'lxml')
+            [s.extract() for s in soup(['iframe', 'script', 'style'])]
+
+            doc['contents'] = soup.get_text()
+
+        return documents
+
+    def topic_model(self, documents):
+        log.info('Topic modeling')
+
+        with open('stopwords.txt', 'r') as f:
+            stopwords = f.read().split()
+
+        vectorizer = CountVectorizer(stop_words=stopwords)
+        data_corpus = (r.get('contents', '') for r in documents)
+        X = vectorizer.fit_transform(data_corpus)
+        vocab = vectorizer.get_feature_names()
+
+        # print(vocab)
+        # print(X.toarray())
+
+        model = lda.LDA(n_topics=len(documents) // 2, n_iter=1500, random_state=1)
+        model.fit(X)
+        topic_word = model.topic_word_
+        n_top_words = 15
+
+        for i, topic_dist in enumerate(topic_word):
+            topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
+            log.info('Topic {}: {}'.format(i, ' '.join(topic_words)))
+
+        doc_topics = model.doc_topic_
+
+        for (doc, topic) in zip(documents, doc_topics):
+            doc['topic'] = topic
+
+        return documents
+
 
 class SearchExpanderArpa:
     """
@@ -128,6 +173,8 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         for item in items:
             sanitized.append({'name': item['title'], 'url': item['link'], 'description': item['snippet']})
 
+        log.info('Got %s results from search.' % len(sanitized))
+
         return sanitized
 
 
@@ -158,6 +205,8 @@ class RFSearch_GoogleUI(RFSearch, SearchExpanderArpa):
         for item in res:
             sanitized.append({'name': item.name, 'url': item.link, 'description': item.description})
 
+        log.info('Got %s results from search.' % len(sanitized))
+
         return sanitized
 
 
@@ -181,46 +230,24 @@ if __name__ == "__main__":
     search_words = args.words
     engine = args.engine
 
+    np.set_printoptions(precision=3, suppress=True)
+
     params = {}
     if apikey:
         params.update({'apikey': apikey})
     searcher = engines[engine](**params)
 
-    with open('stopwords.txt', 'r') as f:
-        stopwords = f.read().split()
-
-    # res = searcher.search(search_words)
-    res = pickle.load(open('google_search_results.pkl', 'rb'))
+    docs = searcher.search(search_words)
+    # docs = pickle.load(open('google_search_results.pkl', 'rb'))
     # pickle.dump(res, open('google_search_results.pkl', 'wb'))
 
-    log.info('Got %s results from search.' % len(res))
-    log.info('Scraping results')
+    docs = searcher.scrape_contents(docs)
 
-    for r in res:
-        log.debug('Scraping result %s:  %s' % (r['name'], r['url']))
+    docs = searcher.topic_model(docs)
 
-        # Expecting prerender to be running at port 3000
-        page = requests.get('http://localhost:3000/' + r['url'])
-        soup = BeautifulSoup(page.text, 'lxml')
-        [s.extract() for s in soup(['iframe', 'script', 'style'])]
+    for doc in docs:
+        print(doc['name'].upper())
+        print(doc['description'])
+        print(doc['topic'])
+        print()
 
-        r['contents'] = soup.get_text()
-
-    log.info('Topic modeling')
-
-    vectorizer = CountVectorizer(stop_words=stopwords)
-    data_corpus = (r.get('contents', '') for r in res)
-    X = vectorizer.fit_transform(data_corpus)
-    vocab = vectorizer.get_feature_names()
-
-    # print(vocab)
-    # print(X.toarray())
-
-    model = lda.LDA(n_topics=len(res) // 2, n_iter=1500, random_state=1)
-    model.fit(X)
-    topic_word = model.topic_word_
-    n_top_words = 15
-
-    for i, topic_dist in enumerate(topic_word):
-        topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
-        log.info('Topic {}: {}'.format(i, ' '.join(topic_words)))
