@@ -24,9 +24,8 @@ def search():
     query = request.values.get('query')
     print('Search API got words: %s' % query)
     if query:
-        res = searcher.search(query.split())
-        print('Got %s results' % res.get('searchInformation').get('totalResults'))
-        items = res.get('items')
+        items = searcher.search(query.split())
+        print('Got %s results' % len(items))
         return json.dumps(items)
 
     return ''
