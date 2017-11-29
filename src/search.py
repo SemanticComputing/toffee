@@ -4,15 +4,22 @@
 Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
+import logging
+from time import sleep
+import pickle
 
 import dryscrape
 import lda
 import numpy as np
+import requests
 from arpa_linker.arpa import post
+from bs4 import BeautifulSoup
 from google import google
 from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer
 from webkit_server import EndOfStreamError
+
+log = logging.getLogger(__name__)
 
 
 class RFSearch:
@@ -101,7 +108,7 @@ class RFSearch_GoogleAPI(RFSearch, SearchExpanderArpa):
         # else:
         #     print(res)
 
-        while total_results > 10 and next_page and i < 50:
+        while total_results > 10 and next_page and i < 40:
             i += 10
             res = self.search_service.cse().list(
                 q=query,
@@ -163,7 +170,13 @@ if __name__ == "__main__":
     argparser.add_argument("--engine", help="Search engine", default='GoogleAPI', choices=["GoogleAPI", "GoogleUI"])
     argparser.add_argument("--apikey", help="Google API key")
     argparser.add_argument('words', metavar='Keywords', type=str, nargs='+', help='search keywords')
+    argparser.add_argument("--loglevel", default='INFO', help="Logging level, default is INFO.",
+                           choices=["NOTSET", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
     args = argparser.parse_args()
+
+    logging.basicConfig(filemode='a',
+                        level=getattr(logging, args.loglevel),
+                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     engines = {'GoogleAPI': RFSearch_GoogleAPI,
                'GoogleUI': RFSearch_GoogleUI,
@@ -189,41 +202,28 @@ if __name__ == "__main__":
     print(res[0])
     print()
 
-    dryscrape.start_xvfb()
-
     for r in res:
         print('%s:  %s' % (r['name'], r['url']))
 
-        try:
-            # set up a web scraping session
-            sess = dryscrape.Session(base_url=r['url'])
-            sess.set_attribute('auto_load_images', False)
+        # Expecting prerender to be running at port 3000
+        page = requests.get('http://localhost:3000/' + r['url'])
+        soup = BeautifulSoup(page.text, 'lxml')
+        [s.extract() for s in soup(['iframe', 'script', 'style'])]
 
-            # visit page
-            sess.visit('/')
-        except (EndOfStreamError, ConnectionResetError, ConnectionRefusedError):
-            print()
-            continue
-
-        q = sess.at_xpath('//text()')
-
-        # extract all text
-        body_text = sess.xpath('//body')[0].text()
-
-        r['contents'] = body_text
+        r['contents'] = soup.get_text()
 
     vectorizer = CountVectorizer(stop_words=stopwords)
     data_corpus = (r.get('contents', '') for r in res)
     X = vectorizer.fit_transform(data_corpus)
     vocab = vectorizer.get_feature_names()
 
-    print(vocab)
-    print(X.toarray())
+    # print(vocab)
+    # print(X.toarray())
 
     model = lda.LDA(n_topics=len(res) // 2, n_iter=1500, random_state=1)
     model.fit(X)
     topic_word = model.topic_word_
-    n_top_words = 8
+    n_top_words = 15
 
     for i, topic_dist in enumerate(topic_word):
         topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
