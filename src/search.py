@@ -196,7 +196,6 @@ if __name__ == "__main__":
     # pickle.dump(res, open('google_search_results.pkl', 'wb'))
 
     log.info('Got %s results from search.' % len(res))
-
     log.info('Scraping results')
 
     for r in res:

@@ -8,11 +8,13 @@ import logging
 
 from flask import Flask, request, json
 from flask_cors import CORS
+from flask_socketio import SocketIO, send, emit
 
 from search import RFSearch_GoogleAPI
 
 app = Flask(__name__)
 CORS(app)
+socketio = SocketIO(app)
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +36,12 @@ def search():
     return ''
 
 
+@socketio.on('my_broadcast_event')
+def handle_message(message):
+    print('received message: %s' % message)
+    emit('my_response', message)
+
+
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars='@')
     argparser.add_argument("apikey", help="Google API key")
@@ -48,4 +56,5 @@ if __name__ == "__main__":
 
     searcher = RFSearch_GoogleAPI(args.apikey)
 
-    app.run(host=args.host)
+    socketio.run(app, host=args.host)
+
