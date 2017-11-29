@@ -8,7 +8,6 @@ import logging
 from time import sleep
 import pickle
 
-import dryscrape
 import lda
 import numpy as np
 import requests
@@ -17,7 +16,6 @@ from bs4 import BeautifulSoup
 from google import google
 from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer
-from webkit_server import EndOfStreamError
 
 log = logging.getLogger(__name__)
 

@@ -5,6 +5,7 @@ Relevance feedback search API.
 """
 import argparse
 import logging
+import pickle
 
 from flask import Flask, request, json
 from flask_cors import CORS
@@ -24,16 +25,17 @@ def hello():
     return __doc__
 
 
-@app.route('/search', methods=['GET', 'POST'])
-def search():
-    query = request.values.get('query')
+@socketio.on('search')
+def search(query):
     log.info('Search API got words: %s' % query)
     if query:
-        items = searcher.search(query.split())
+        emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])})
+        # items = searcher.search(query['data'].split())
+        items = pickle.load(open('google_search_results.pkl', 'rb'))
+        emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
         log.info('Got %s results' % len(items))
-        return json.dumps(items)
-
-    return ''
+        # pickle.dump(items, open('google_search_results.pkl', 'wb'))
+        emit('search_ready', {'data': json.dumps(items)})
 
 
 @socketio.on('my_broadcast_event')
@@ -57,4 +59,3 @@ if __name__ == "__main__":
     searcher = RFSearch_GoogleAPI(args.apikey)
 
     socketio.run(app, host=args.host)
-
