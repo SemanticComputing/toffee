@@ -54,27 +54,13 @@ def search_feedback(words, thumbs, result_id):
     if words and result_id:
         previous_items = search_cache[result_id]
 
-        # TODO: Get words from previous result topics with thumbs up and add them to words
+        query = words
+
+        # TODO: Get words from previous result topics with thumbs up and add them to query
 
         # TODO: Remove words from previous result topics with thumbs down and add them to words
 
-        # TODO: Do search
-
-        # emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])})
-        # # items = searcher.search(query['data'].split())
-        # items = pickle.load(open('google_search_results.pkl', 'rb'))
-        # emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
-        # log.info('Got %s results' % len(items))
-        # # pickle.dump(items, open('google_search_results.pkl', 'wb'))
-        #
-        # result_hash = sha1(json.dumps(items, sort_keys=True).encode("utf-8")).hexdigest()
-        # results = {'result_id': result_hash, 'items': items}
-        # emit('search_ready', {'data': json.dumps(results)})
-
-        # TODO: scrape results
-        # TODO: topic modeling of results
-
-        # search_cache.update({result_hash: items})
+        search(query)
 
 
 @socketio.on('my_broadcast_event')
