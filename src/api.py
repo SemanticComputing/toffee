@@ -6,6 +6,7 @@ Relevance feedback search API.
 import argparse
 import logging
 import pickle
+from hashlib import sha1
 
 from flask import Flask, request, json
 from flask_cors import CORS
@@ -18,6 +19,8 @@ CORS(app)
 socketio = SocketIO(app)
 
 log = logging.getLogger(__name__)
+
+search_cache = dict()
 
 
 @app.route('/')
@@ -35,7 +38,12 @@ def search(query):
         emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
         log.info('Got %s results' % len(items))
         # pickle.dump(items, open('google_search_results.pkl', 'wb'))
-        emit('search_ready', {'data': json.dumps(items)})
+
+        result_hash = sha1(json.dumps(items, sort_keys=True).encode("utf-8")).hexdigest()
+        results = {'result_id': result_hash, 'items': items}
+        emit('search_ready', {'data': json.dumps(results)})
+
+        search_cache.update({result_hash: items})
 
 
 @socketio.on('my_broadcast_event')
