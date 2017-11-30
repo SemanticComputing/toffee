@@ -43,9 +43,8 @@ def search(query):
         results = {'result_id': result_hash, 'items': items}
         emit('search_ready', {'data': json.dumps(results)})
 
-        # TODO: scrape results
-        # TODO: topic modeling of results
-
+        items = searcher.scrape_contents(items)
+        items = searcher.topic_model(items)
         search_cache.update({result_hash: items})
 
 
