@@ -41,7 +41,13 @@ class RFSearch:
             soup = BeautifulSoup(page.text, 'lxml')
             [s.extract() for s in soup(['iframe', 'script', 'style'])]
 
-            doc['contents'] = soup.get_text()
+            text_content = soup.get_text()
+            if not text_content:
+                log.warning('Unable to scrape any content for URL: %s' % doc['url'])
+            else:
+                log.debug('Scraped {len} characters from URL: {url}'.format(len=len(text_content), url=doc['url']))
+
+            doc['contents'] = text_content
 
         return documents
 
@@ -52,7 +58,12 @@ class RFSearch:
             stopwords = f.read().split()
 
         vectorizer = CountVectorizer(stop_words=stopwords)
-        data_corpus = (r.get('contents', '') for r in documents)
+        data_corpus = [r.get('contents', '') for r in documents]
+
+        if len(documents) <= 1 or not any(data_corpus):
+            log.error('Not enough documents for topic modeling, or corpus empty.')
+            return documents
+
         X = vectorizer.fit_transform(data_corpus)
         vocab = vectorizer.get_feature_names()
 
@@ -138,21 +149,14 @@ class RFSearch_GoogleAPI(RFSearch):
             cx='012121639191539030590:cshq4wzc7ms',
             num=10,
             start=1,
-            # excludeTerms='foo'
         ).execute()
 
-        items = res.get('items')
-        next_page = True  # res.get('nextPage')
+        items = res.get('items') or []
+        next_page = True
         i = 1
 
         total_results = int(res.get('searchInformation').get('totalResults'))
-        if items:
-            log.debug('Got %s results' % total_results)
-            # pprint.pprint(items)
-        #     pickle.dump(res, open('results.pkl', 'wb'))
-        #     print('Results saved to file.')
-        # else:
-        #     print(res)
+        log.debug('Got %s total results from initial search query' % total_results)
 
         while total_results > 10 and next_page and i < 40:
             i += 10
@@ -167,15 +171,17 @@ class RFSearch_GoogleAPI(RFSearch):
 
             if new_items:
                 items += new_items
-
             else:
+                next_page = False
+
+            if i + 10 > total_results:
                 next_page = False
 
         sanitized = []
         for item in items:
             sanitized.append({'name': item['title'], 'url': item['link'], 'description': item['snippet']})
 
-        log.info('Got %s results from search.' % len(sanitized))
+        log.info('Returning %s results from search.' % len(sanitized))
 
         return sanitized
 
@@ -253,6 +259,6 @@ if __name__ == "__main__":
     for doc in docs:
         print(doc['name'].upper())
         print(doc['description'])
-        print(doc['topic'])
+        print(doc.get('topic'))
         print()
 
