@@ -62,7 +62,7 @@ class RFSearch:
 
         if len(documents) <= 1 or not any(data_corpus):
             log.error('Not enough documents for topic modeling, or corpus empty.')
-            return documents
+            return documents, [[]]
 
         X = vectorizer.fit_transform(data_corpus)
         vocab = vectorizer.get_feature_names()
@@ -74,17 +74,19 @@ class RFSearch:
         model.fit(X)
         topic_word = model.topic_word_
         n_top_words = 15
+        topics_words = []
 
         for i, topic_dist in enumerate(topic_word):
             topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
             log.info('Topic {}: {}'.format(i, ' '.join(topic_words)))
+            topics_words.append(topic_words.tolist())
 
         doc_topics = model.doc_topic_
 
         for (doc, topic) in zip(documents, doc_topics):
             doc['topic'] = topic.tolist()
 
-        return documents
+        return documents, topics_words
 
 
 class SearchExpanderArpa:
@@ -254,7 +256,7 @@ if __name__ == "__main__":
 
     docs = searcher.scrape_contents(docs)
 
-    docs = searcher.topic_model(docs)
+    docs, _ = searcher.topic_model(docs)
 
     for doc in docs:
         print(doc['name'].upper())

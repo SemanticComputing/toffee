@@ -8,6 +8,7 @@ import logging
 import pickle
 from hashlib import sha1
 
+import numpy as np
 from flask import Flask, request, json
 from flask_cors import CORS
 from flask_socketio import SocketIO, send, emit
@@ -23,6 +24,48 @@ log = logging.getLogger(__name__)
 search_cache = dict()
 
 
+def get_results(words):
+    query_hash = sha1(' '.join(words).encode("utf-8")).hexdigest()
+    cache_hit = search_cache.get(query_hash, {})
+    items = cache_hit.get('items')
+
+    if items:
+        log.info('Cache hit for search id %s' % query_hash)
+        return cache_hit
+
+    items = searcher.search(words)
+    # items = pickle.load(open('google_search_results.pkl', 'rb'))
+    log.debug('Got %s results through search' % len(items))
+
+    results = {'result_id': query_hash, 'items': items}
+    search_cache.update({query_hash: results})
+    return results
+
+
+def get_topics(results):
+    items = results.get('items')
+    query_hash = results.get('result_id')
+
+    cache_hit = search_cache.get(query_hash, {})
+    topic_words = cache_hit.get('topic_words')
+
+    if topic_words:
+        return results, topic_words
+
+    log.debug('Scraping for search id %s' % query_hash)
+    emit('search_status_msg', {'data': 'Scraping'})
+    items = searcher.scrape_contents(items)
+
+    log.debug('Topic modeling for search id %s' % query_hash)
+    emit('search_status_msg', {'data': 'Topic modeling'})
+    items, topic_words = searcher.topic_model(items)
+
+    results.update({'items': items, 'topic_words': topic_words})
+    search_cache.update({query_hash: results})
+
+    return results, topic_words
+
+
 @app.route('/')
 def hello():
     return __doc__
@@ -30,50 +73,47 @@ def hello():
 
 @socketio.on('search')
 def search(query):
-    log.info('Search API got words: %s' % query)
+    log.info('Search API got query: %s' % query)
 
     if query:
         emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])})
         search_words = query['data']['query'].split()
-        query_hash = sha1(' '.join(search_words).encode("utf-8")).hexdigest()
+        thumbs = query['data'].get('thumbs')
 
-        items = search_cache.get(query_hash, {}).get('items')
+        results = get_results(search_words)
+        items = results['items']
 
-        if not items:
-            items = searcher.search(search_words)
-            # items = pickle.load(open('google_search_results.pkl', 'rb'))
-            log.info('Got %s results through search' % len(items))
-        else:
-            log.info('Got %s results from cache' % len(items))
+        if not thumbs:
+            emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
+            emit('search_ready', {'data': json.dumps(results)})
+
+        results, topic_words = get_topics(results)
+        items = results['items']
+
+        if thumbs:
+            for item in items:
+                url = item['url']
+                thumb = thumbs.get(url, {}).get('value')
+                thumb_words = topic_words[np.argmax(item['topic'])]
+                if thumb is True:
+                    new_words = thumb_words[:3]
+                    search_words += [word for word in new_words if word not in search_words]
+                elif thumb is False:
+                    [search_words.remove(word) for word in thumb_words if word in search_words]
+
+        results = get_results(search_words)
+        items = results['items']
 
         emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
-
-        # TODO: Thumbz
-
-        results = {'result_id': query_hash, 'items': items}
-
         emit('search_ready', {'data': json.dumps(results)})
 
-        emit('search_status_msg', {'data': 'Processing results'})
-        topics = search_cache.get(query_hash, {}).get('has_topics')
-
-        if topics:
-            results.update({'topics': topics})
-            log.info('Cache hit for search id %s' % query_hash)
-        else:
-            log.info('Scraping for search id %s' % query_hash)
-            emit('search_status_msg', {'data': 'Scraping'})
-            items = searcher.scrape_contents(items)
-
-            log.info('Topic modeling for search id %s' % query_hash)
-            emit('search_status_msg', {'data': 'Topic modeling'})
-            items = searcher.topic_model(items)
+        results, topic_words = get_topics(results)
+        items = results['items']
 
         emit('search_status_msg', {'data': 'Done'})
-        results = {'result_id': query_hash, 'items': items, 'has_topics': True}
+        results.update({'items': items, 'topic_words': topic_words})
 
-        log.info('Updating cache for search id %s' % query_hash)
-        search_cache.update({query_hash: results})
+        log.info('Dumping pickle')
         pickle.dump(search_cache, open('search_cache.pkl', 'wb'))
 
 
