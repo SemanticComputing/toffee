@@ -31,42 +31,50 @@ def hello():
 @socketio.on('search')
 def search(query):
     log.info('Search API got words: %s' % query)
+
     if query:
         emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])})
-        # items = searcher.search(query['data'].split())
-        items = pickle.load(open('google_search_results.pkl', 'rb'))
-        emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
-        log.info('Got %s results' % len(items))
-        # pickle.dump(items, open('google_search_results.pkl', 'wb'))
+        search_words = query['data']['query'].split()
+        query_hash = sha1(' '.join(search_words).encode("utf-8")).hexdigest()
 
-        result_hash = sha1(json.dumps(items, sort_keys=True).encode("utf-8")).hexdigest()
-        results = {'result_id': result_hash, 'items': items}
+        items = search_cache.get(query_hash, {}).get('items')
+
+        if not items:
+            items = searcher.search(search_words)
+            # items = pickle.load(open('google_search_results.pkl', 'rb'))
+            log.info('Got %s results through search' % len(items))
+        else:
+            log.info('Got %s results from cache' % len(items))
+
+        emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
+
+        # TODO: Thumbz
+
+        results = {'result_id': query_hash, 'items': items}
+
         emit('search_ready', {'data': json.dumps(results)})
 
-        items = searcher.scrape_contents(items)
-        items = searcher.topic_model(items)
-        search_cache.update({result_hash: items})
+        emit('search_status_msg', {'data': 'Processing results'})
+        topics = search_cache.get(query_hash, {}).get('has_topics')
 
+        if topics:
+            results.update({'topics': topics})
+            log.info('Cache hit for search id %s' % query_hash)
+        else:
+            log.info('Scraping for search id %s' % query_hash)
+            emit('search_status_msg', {'data': 'Scraping'})
+            items = searcher.scrape_contents(items)
 
-@socketio.on('search_feedback')
-def search_feedback(words, thumbs, result_id):
-    log.info('Search feedback API got words: %s' % words)
-    if words and result_id:
-        previous_items = search_cache[result_id]
+            log.info('Topic modeling for search id %s' % query_hash)
+            emit('search_status_msg', {'data': 'Topic modeling'})
+            items = searcher.topic_model(items)
 
-        query = words
+        emit('search_status_msg', {'data': 'Done'})
+        results = {'result_id': query_hash, 'items': items, 'has_topics': True}
 
-        # TODO: Get words from previous result topics with thumbs up and add them to query
-
-        # TODO: Remove words from previous result topics with thumbs down and add them to words
-
-        search(query)
-
-
-@socketio.on('my_broadcast_event')
-def handle_message(message):
-    print('received message: %s' % message)
-    emit('my_response', message)
+        log.info('Updating cache for search id %s' % query_hash)
+        search_cache.update({query_hash: results})
+        pickle.dump(search_cache, open('search_cache.pkl', 'wb'))
 
 
 if __name__ == "__main__":
@@ -82,5 +90,11 @@ if __name__ == "__main__":
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     searcher = RFSearch_GoogleAPI(args.apikey)
+
+    if not search_cache:
+        try:
+            search_cache = pickle.load(open('search_cache.pkl', 'rb'))
+        except FileNotFoundError:
+            log.info('Search cache log file not found.')
 
     socketio.run(app, host=args.host)

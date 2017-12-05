@@ -82,7 +82,7 @@ class RFSearch:
         doc_topics = model.doc_topic_
 
         for (doc, topic) in zip(documents, doc_topics):
-            doc['topic'] = topic
+            doc['topic'] = topic.tolist()
 
         return documents
 
