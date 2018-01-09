@@ -5,7 +5,7 @@ RUN apt-get update \
             python-lxml python-pip xvfb \
     && rm -rf /var/cache/apk/*
 
-COPY requirements.txt /app/
+COPY src/requirements.txt /app/
 WORKDIR /app/
 
 RUN pip install -r requirements.txt

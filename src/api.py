@@ -8,6 +8,7 @@ import logging
 import pickle
 from hashlib import sha1
 
+import eventlet
 import numpy as np
 from flask import Flask, request, json
 from flask_cors import CORS
@@ -17,11 +18,15 @@ from search import RFSearch_GoogleAPI
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app)
+socketio = SocketIO(app, ping_timeout=600, message_queue='redis://')
 
 log = logging.getLogger(__name__)
 
 search_cache = dict()
+
+eventlet.monkey_patch()
+
+# TODO: Cache scrape results separately
 
 
 def get_results(words):
@@ -78,28 +83,36 @@ def search(query):
     if query:
         emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])})
         search_words = query['data']['query'].split()
-        thumbs = query['data'].get('thumbs')
+        frontend_results = query['data'].get('results')
 
         results = get_results(search_words)
         items = results['items']
 
-        if not thumbs:
+        emit('search_words', {'data': search_words})
+
+        if not frontend_results:
             emit('search_status_msg', {'data': 'Got {} results'.format(len(items))})
             emit('search_ready', {'data': json.dumps(results)})
 
         results, topic_words = get_topics(results)
         items = results['items']
 
-        if thumbs:
+        if frontend_results:
             for item in items:
                 url = item['url']
-                thumb = thumbs.get(url, {}).get('value')
-                thumb_words = topic_words[np.argmax(item['topic'])]
-                if thumb is True:
-                    new_words = thumb_words[:3]
-                    search_words += [word for word in new_words if word not in search_words]
-                elif thumb is False:
-                    [search_words.remove(word) for word in thumb_words if word in search_words]
+                thumb = next((res.get('thumb') for res in frontend_results if res.get('url') == url), None)
+                if 'topic' in item:
+                    thumb_words = topic_words[np.argmax(item['topic'])]
+                    if thumb is True:
+                        # TODO: Make magic happen
+                        new_words = thumb_words[:3]
+                        search_words += [word for word in new_words if word not in search_words]
+                    elif thumb is False:
+                        [search_words.remove(word) for word in thumb_words if word in search_words]
+
+            search_words = search_words[:20]
+
+        emit('search_words', {'data': search_words})
 
         results = get_results(search_words)
         items = results['items']

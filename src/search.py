@@ -18,6 +18,8 @@ from sklearn.feature_extraction.text import CountVectorizer
 
 log = logging.getLogger(__name__)
 
+# TODO: Query results from 2016+.
+
 
 class RFSearch:
     """
