@@ -5,7 +5,6 @@ Relevance feedback search API.
 """
 import argparse
 import logging
-import pickle
 
 import eventlet
 from flask import Flask, request
@@ -39,7 +38,7 @@ def search(query):
     log.info('Search API got query: %s' % query)
 
     if query:
-        search_worker.delay(query, request.sid)
+        search_worker.delay(query, request.sid, stopwords)
 
 
 if __name__ == "__main__":
@@ -52,15 +51,14 @@ if __name__ == "__main__":
 
     args = argparser.parse_args()
 
+    stopwords = None
+    with open('fin_stopwords.txt', 'r') as f:
+        stopwords = f.read().split()
+
+    with open('eng_stopwords.txt', 'r') as f:
+        stopwords += f.read().split()
+
     logging.basicConfig(level=getattr(logging, args.loglevel),
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-    # searcher = RFSearch_GoogleAPI(args.apikey)
-
-    if not search_cache:
-        try:
-            search_cache = pickle.load(open('search_cache.pkl', 'rb'))
-        except FileNotFoundError:
-            log.info('Search cache log file not found.')
 
     socketio.run(app, host=args.host, port=args.port)

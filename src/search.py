@@ -26,8 +26,14 @@ class RFSearch:
     Relevance-feedback search abstract class.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, stopwords=None):
+        self.stopwords = set(stopwords or [])  # Using set for better time complexity in "x in stopwords"
+
+    def filter_words(self, words):
+        filtered = [word for word in words if word not in self.stopwords]
+        log.info(self.stopwords)
+        log.info('Stripped stop words: %s' % (set(words) - set(filtered)))
+        return filtered
 
     def search(self, words):
         pass
@@ -56,10 +62,7 @@ class RFSearch:
     def topic_model(self, documents):
         log.info('Topic modeling')
 
-        with open('stopwords.txt', 'r') as f:
-            stopwords = f.read().split()
-
-        vectorizer = CountVectorizer(stop_words=stopwords)
+        vectorizer = CountVectorizer(stop_words=self.stopwords)
         data_corpus = [r.get('contents', '') for r in documents]
 
         if len(documents) <= 1 or not any(data_corpus):
@@ -129,23 +132,31 @@ class RFSearch_GoogleAPI(RFSearch):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, apikey='', arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
-        RFSearch.__init__(self)
+    def __init__(self, apikey='', arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', stopwords=None):
+        super().__init__(stopwords=stopwords)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
         if arpa_url:
             self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
         else:
             self.word_expander = lambda words: [(word,) for word in words]
 
-    def search(self, words):
+    @staticmethod
+    def combine_expanded(expanded):
+        return [' OR '.join(wordset) for wordset in expanded]
+
+    def search(self, words, expand_words=True):
         """
         Create a search query based on a list of words and query for results.
 
-        :param words:
+        :param words: list of words
+        :param expand_words:
         :return:
         """
-        expanded_words = self.word_expander(words)
-        query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
+        if expand_words:
+            words = self.combine_expanded(self.word_expander(words))
+
+        query = ' '.join(words)
+
         log.info('Query: %s' % query)
 
         res = self.search_service.cse().list(
@@ -195,23 +206,31 @@ class RFSearch_GoogleUI(RFSearch):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
-        RFSearch.__init__(self)
+    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', stopwords=None):
+        super().__init__(stopwords=stopwords)
         self.num_results = 10
         if arpa_url:
             self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
         else:
             self.word_expander = lambda words: [(word,) for word in words]
 
-    def search(self, words):
+    @staticmethod
+    def combine_expanded(words):
+        return [' OR '.join(wordset) for wordset in words]
+
+    def search(self, words, expand_words=True):
         """
         Create a search query based on a list of words and query for results.
 
+        :param expand_words:
         :param words:
         :return:
         """
-        expanded_words = self.word_expander(words)
-        query = ' '.join([' OR '.join(wordset) for wordset in expanded_words])
+        if expand_words:
+            words = self.combine_expanded(self.word_expander(words))
+
+        query = ' '.join(words)
+
         log.info('Query: %s' % query)
 
         res = google.search(query, self.num_results)
@@ -247,7 +266,11 @@ if __name__ == "__main__":
 
     np.set_printoptions(precision=3, suppress=True)
 
+    with open('stopwords.txt', 'r') as f:
+        stopwords = f.read().split()
+
     params = {}
+    params.update({'stopwords': stopwords})
     if apikey:
         params.update({'apikey': apikey})
     searcher = engines[engine](**params)
