@@ -22,6 +22,7 @@ alle
 aloitattaa
 aloitetteva
 aloittaa
+alt
 alta
 aluksi
 alussa
@@ -34,6 +35,7 @@ apu
 asia
 asti
 avulla
+com
 edellä
 edelle
 edelleen
