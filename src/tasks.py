@@ -25,6 +25,7 @@ celery_app = Celery('tasks', broker='redis://')
 socketio = SocketIO(message_queue='redis://')
 
 search_cache = redis.StrictRedis(host='localhost', port=6379, db=0)
+scrape_cache = redis.StrictRedis(host='localhost', port=6379, db=1)
 
 
 def search_cache_get(key, default=None):
@@ -92,7 +93,7 @@ def search_worker(query, sessionid, stopwords):
     log.debug('Got results from API: {res}'.format(res=frontend_results))
 
     apikey = os.environ["APIKEY"]
-    searcher = RFSearch_GoogleAPI(apikey, stopwords=stopwords)
+    searcher = RFSearch_GoogleAPI(apikey, stopwords=stopwords, scrape_cache=scrape_cache)
 
     results = get_results(searcher, search_words, sessionid)
     items = results['items']

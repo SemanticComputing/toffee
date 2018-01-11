@@ -4,6 +4,7 @@
 Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
+import json
 import logging
 import pickle
 
@@ -21,18 +22,43 @@ log = logging.getLogger(__name__)
 # TODO: Query results from 2016+.
 
 
+def scrape(url):
+    """
+    Scrape a web page using prerender.
+    Expects prerender to be running at port 3000.
+
+    :param url: URL
+    :return: text contents
+    """
+    page = requests.get('http://localhost:3000/' + url)
+    soup = BeautifulSoup(page.text, 'lxml')
+    [s.extract() for s in soup(['iframe', 'script', 'style'])]
+
+    page_content = soup.get_text()
+    if page_content:
+        log.info('Scraped {len} characters from URL: {url}'.format(len=len(page_content), url=url))
+    else:
+        log.warning('Unable to scrape any content for URL: %s' % url)
+
+    return page_content
+
+
 class RFSearch:
     """
     Relevance-feedback search abstract class.
     """
 
-    def __init__(self, stopwords=None):
-        self.stopwords = set(stopwords or [])  # Using set for better time complexity in "x in stopwords"
+    def __init__(self, stopwords=None, scrape_cache=None):
+        """
+        :param stopwords: list of stopwords
+        :param scrape_cache: redis instance to use as a cache for web pages, or None for not using cache
+        """
+        self.stopwords = set(stopwords or [])  # Using set for better time complexity for "x in stopwords"
+        self.scrape_cache = scrape_cache
 
     def filter_words(self, words):
         filtered = [word for word in words if word not in self.stopwords]
-        log.info(self.stopwords)
-        log.info('Stripped stop words: %s' % (set(words) - set(filtered)))
+        log.info('Stripped stop words: %s' % ((set(words) - set(filtered)) or '-'))
         return filtered
 
     def search(self, words):
@@ -42,27 +68,33 @@ class RFSearch:
         log.info('Scraping results')
 
         for doc in documents:
-            log.debug('Scraping document %s:  %s' % (doc['name'], doc['url']))
+            text_content = None
+            if self.scrape_cache:
+                try:
+                    cached_content = self.scrape_cache.get(doc['url'])
+                    if cached_content:
+                        text_content = str(cached_content)
+                        log.info('Found page content (%s chars) from scrape cache: %s' % (len(text_content), doc['url']))
+                except TypeError:
+                    pass
 
-            # Expecting prerender to be running at port 3000
-            page = requests.get('http://localhost:3000/' + doc['url'])
-            soup = BeautifulSoup(page.text, 'lxml')
-            [s.extract() for s in soup(['iframe', 'script', 'style'])]
-
-            text_content = soup.get_text()
             if not text_content:
-                log.warning('Unable to scrape any content for URL: %s' % doc['url'])
-            else:
-                log.debug('Scraped {len} characters from URL: {url}'.format(len=len(text_content), url=doc['url']))
+                log.debug('Scraping document %s:  %s' % (doc['name'], doc['url']))
 
-            doc['contents'] = text_content
+                text_content = scrape(doc['url'])
+                if self.scrape_cache and text_content:
+                    log.info('Adding page to scrape cache: %s' % (doc['url']))
+                    self.scrape_cache.set(doc['url'], text_content)
+
+            if text_content:
+                doc['contents'] = text_content
 
         return documents
 
     def topic_model(self, documents):
         log.info('Topic modeling')
 
-        vectorizer = CountVectorizer(stop_words=self.stopwords)
+        vectorizer = CountVectorizer(stop_words=list(self.stopwords))
         data_corpus = [r.get('contents', '') for r in documents]
 
         if len(documents) <= 1 or not any(data_corpus):
@@ -132,8 +164,12 @@ class RFSearch_GoogleAPI(RFSearch):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, apikey='', arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', stopwords=None):
-        super().__init__(stopwords=stopwords)
+    def __init__(self,
+                 apikey='',
+                 arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
+                 stopwords=None,
+                 scrape_cache=None):
+        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
         if arpa_url:
             self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
@@ -156,6 +192,9 @@ class RFSearch_GoogleAPI(RFSearch):
             words = self.combine_expanded(self.word_expander(words))
 
         query = ' '.join(words)
+        while len(query) > 2500:
+            words.pop()
+            query = ' '.join(words)
 
         log.info('Query: %s' % query)
 
@@ -206,8 +245,8 @@ class RFSearch_GoogleUI(RFSearch):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', stopwords=None):
-        super().__init__(stopwords=stopwords)
+    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', stopwords=None, scrape_cache=None):
+        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache)
         self.num_results = 10
         if arpa_url:
             self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words

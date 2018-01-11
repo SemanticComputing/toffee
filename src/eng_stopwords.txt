@@ -179,3 +179,9 @@ image
 org
 title
 src
+amp
+style
+none
+height
+width
+fi

@@ -103,6 +103,8 @@ jälkeen
 jälleen
 jo
 johon
+joiden
+joita
 joka
 jokainen
 jokin
@@ -115,6 +117,7 @@ joo
 jopa
 jos
 joskus
+jossa
 josta
 jota
 jotain
@@ -275,14 +278,19 @@ ohi
 oikea
 oikealla
 oikein
+ole
 oli
+olivat
 olla
+ollut
 oma
 omaa
 omata
 omia
 omistaa
 on
+onko
+ovat
 päälle
 paikoittain
 paitsi
@@ -301,7 +309,7 @@ puolesta
 puolestaan
 runsaasti
 saakka
-sadam
+sai
 sama
 samalla
 saman
@@ -368,6 +376,7 @@ täytyä
 te
 tie
 tietysti
+tms
 todella
 toinen
 toisaalla
@@ -379,6 +388,7 @@ toki
 tosin
 tuhannen
 tuhat
+tulee
 tuli
 tulinen
 tulla
