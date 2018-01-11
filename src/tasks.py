@@ -6,13 +6,13 @@ Relevance feedback search Celery tasks.
 import logging
 import os
 from hashlib import sha1
+from operator import itemgetter
 
 import eventlet
-import numpy as np
 import redis
 from celery import Celery
-from flask import json, Flask
-from flask_cors import CORS
+from collections import defaultdict
+from flask import json
 from flask_socketio import SocketIO
 
 from search import RFSearch_GoogleAPI
@@ -35,7 +35,7 @@ def search_cache_get(key, default=None):
         return default
 
 
-def search_cache_update(key, value, expire=60*60*24):
+def search_cache_update(key, value, expire=60 * 60 * 24):
     return search_cache.setex(key, expire, json.dumps(value))
 
 
@@ -105,22 +105,26 @@ def search_worker(query, sessionid, stopwords):
     results, topic_words = get_topics(searcher, results, sessionid)
     items = results['items']
 
+    new_word_weights = defaultdict(int, zip(search_words, [1] * len(search_words)))
     if frontend_results:
         for item in items:
             url = item['url']
             thumb = next((res.get('thumb') for res in frontend_results if res.get('url') == url), None)
-            if 'topic' in item:
-                thumb_words = topic_words[np.argmax(item['topic'])]
-                if thumb is True:
-                    # TODO: Make magic happen
-                    new_words = thumb_words[:3]
-                    search_words += [word for word in new_words if word not in search_words]
-                elif thumb is False:
-                    [search_words.remove(word) for word in thumb_words if word in search_words]
 
-        search_words = search_words[:20]
+            if 'topic' not in item or not thumb:
+                continue
 
-    # socketio.emit('search_words', {'data': search_words}, room=sessionid)
+            for topic, topic_weight in enumerate(item['topic']):
+                for word, weight in topic_words[topic]:
+                    weight = float(weight)
+                    new_weight = topic_weight * weight * 100
+                    log.info('Topic %s, word %s: %s' % (topic, word, new_weight))
+
+                    new_word_weights[word] += weight * (1 if thumb else -1)
+
+        new_search_words, _ = zip(*sorted(new_word_weights.items(), key=itemgetter(1), reverse=True))
+        search_words = new_search_words[:(max(5, len(search_words)))]
+        log.info('New search words based on topic modeling and thumbs: %s' % (new_search_words,))
 
     results = get_results(searcher, search_words, sessionid)
     items = results['items']

@@ -58,6 +58,8 @@ if __name__ == "__main__":
     with open('eng_stopwords.txt', 'r') as f:
         stopwords += f.read().split()
 
+    stopwords += [str(num) for num in range(3000)]
+
     logging.basicConfig(level=getattr(logging, args.loglevel),
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 

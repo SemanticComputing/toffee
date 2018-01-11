@@ -4,9 +4,7 @@
 Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
-import json
 import logging
-import pickle
 
 import lda
 import numpy as np
@@ -18,6 +16,7 @@ from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer
 
 log = logging.getLogger(__name__)
+
 
 # TODO: Query results from 2016+.
 
@@ -75,7 +74,8 @@ class RFSearch:
                     cached_content = self.scrape_cache.get(doc['url'])
                     if cached_content:
                         text_content = str(cached_content)
-                        log.info('Found page content (%s chars) from scrape cache: %s' % (len(text_content), doc['url']))
+                        log.info(
+                            'Found page content (%s chars) from scrape cache: %s' % (len(text_content), doc['url']))
                 except TypeError:
                     pass
 
@@ -105,19 +105,22 @@ class RFSearch:
         X = vectorizer.fit_transform(data_corpus)
         vocab = vectorizer.get_feature_names()
 
-        # print(vocab)
-        # print(X.toarray())
+        n_topics = 1 + min(len(documents) // 3, 11)
 
-        model = lda.LDA(n_topics=len(documents) // 2, n_iter=1500, random_state=1)
+        model = lda.LDA(n_topics=n_topics, n_iter=1500, random_state=1)
         model.fit(X)
         topic_word = model.topic_word_
-        n_top_words = 15
+        n_top_words = 10
         topics_words = []
 
+        eps = 0.001
         for i, topic_dist in enumerate(topic_word):
-            topic_words = np.array(vocab)[np.argsort(topic_dist)][:-n_top_words:-1]
-            log.info('Topic {}: {}'.format(i, ' '.join(topic_words)))
-            topics_words.append(topic_words.tolist())
+            wordindex = np.argsort(topic_dist)[::-1]  # rev sort
+            weights = topic_dist[wordindex]  # Topic word weights
+            words = [np.array(vocab)[wordindex[j]] for j in range(min(n_top_words, len(wordindex))) if weights[j] > eps]
+            word_weights = [weights[j] for j in range(min(n_top_words, len(wordindex))) if weights[j] > eps]
+            log.info('Topic {}: {}; {}'.format(i, ', '.join(words), ', '.join(map(str, word_weights))))
+            topics_words.append(tuple(zip(words, word_weights)))
 
         doc_topics = model.doc_topic_
 
@@ -328,4 +331,3 @@ if __name__ == "__main__":
         print(doc['description'])
         print(doc.get('topic'))
         print()
-
