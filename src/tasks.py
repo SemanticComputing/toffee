@@ -52,7 +52,7 @@ def get_results(searcher, words, sessionid):
     expanded = searcher.combine_expanded(searcher.word_expander(words))
     socketio.emit('search_words', {'data': ' '.join(expanded)}, room=sessionid)
     items = searcher.search(expanded, expand_words=False)
-    # items = pickle.load(open('google_search_results.pkl', 'rb'))
+
     log.debug('Got %s results through search' % len(items))
 
     results = {'result_id': query_hash, 'items': items}
@@ -98,6 +98,13 @@ def search_worker(query, sessionid, stopwords):
     results = get_results(searcher, search_words, sessionid)
     items = results['items']
 
+    while not items:
+        # Try to get items by removing the last words
+        search_words.pop()
+
+        results = get_results(searcher, search_words, sessionid)
+        items = results['items']
+
     if not frontend_results:
         socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
         socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
@@ -128,6 +135,13 @@ def search_worker(query, sessionid, stopwords):
 
     results = get_results(searcher, search_words, sessionid)
     items = results['items']
+
+    while not items:
+        # Try to get items by removing the last words
+        search_words.pop()
+
+        results = get_results(searcher, search_words, sessionid)
+        items = results['items']
 
     socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
     socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
