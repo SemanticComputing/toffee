@@ -35,8 +35,8 @@ def search_cache_get(key, default=None):
         return default
 
 
-def search_cache_update(key, value):
-    return search_cache.set(key, json.dumps(value))
+def search_cache_update(key, value, expire=60*60*24):
+    return search_cache.setex(key, expire, json.dumps(value))
 
 
 def get_results(searcher, words, sessionid):

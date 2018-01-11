@@ -55,6 +55,7 @@ class RFSearch:
         """
         self.stopwords = set(stopwords or [])  # Using set for better time complexity for "x in stopwords"
         self.scrape_cache = scrape_cache
+        self.scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
 
     def filter_words(self, words):
         filtered = [word for word in words if word not in self.stopwords]
@@ -84,7 +85,7 @@ class RFSearch:
                 text_content = scrape(doc['url'])
                 if self.scrape_cache and text_content:
                     log.info('Adding page to scrape cache: %s' % (doc['url']))
-                    self.scrape_cache.set(doc['url'], text_content)
+                    self.scrape_cache.setex(doc['url'], self.scrape_cache_expire, text_content)
 
             if text_content:
                 doc['contents'] = text_content
