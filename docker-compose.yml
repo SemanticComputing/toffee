@@ -1,0 +1,27 @@
+version: '3'
+services:
+    web:
+        build:
+            dockerfile: Dockerfile.web
+            context: .
+        environment:
+            - API_KEY
+            - REDIS_HOST=redis
+            - PRERENDER_HOST=prerender
+            - PRERENDER_PORT=3000
+        ports:
+            - 5000:5000
+    worker:
+        build:
+            dockerfile: Dockerfile.worker
+            context: .
+        environment:
+            - API_KEY
+            - REDIS_HOST=redis
+            - PRERENDER_HOST=prerender
+            - PRERENDER_PORT=3000
+        user: nobody
+    redis:
+        image: "redis:alpine"
+    prerender:
+        image: "magnetme/prerender-docker"

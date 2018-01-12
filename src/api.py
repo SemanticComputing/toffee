@@ -5,6 +5,7 @@ Relevance feedback search API.
 """
 import argparse
 import logging
+import os
 
 import eventlet
 from flask import Flask, request
@@ -15,7 +16,10 @@ from tasks import search_worker
 
 app = Flask(__name__)
 CORS(app)
-socketio = SocketIO(app, ping_timeout=600, message_queue='redis://')
+
+redis_host = os.environ.get('REDIS_HOST', '')
+
+socketio = SocketIO(app, ping_timeout=600, message_queue='redis://{host}'.format(host=redis_host))
 
 log = logging.getLogger(__name__)
 

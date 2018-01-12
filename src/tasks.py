@@ -21,11 +21,18 @@ eventlet.monkey_patch()
 
 log = logging.getLogger(__name__)
 
-celery_app = Celery('tasks', broker='redis://')
-socketio = SocketIO(message_queue='redis://')
+apikey = os.environ['API_KEY']
 
-search_cache = redis.StrictRedis(host='localhost', port=6379, db=0)
-scrape_cache = redis.StrictRedis(host='localhost', port=6379, db=1)
+prerender_host = os.environ.get('PRERENDER_HOST')
+prerender_port = os.environ.get('PRERENDER_PORT')
+
+redis_host = os.environ.get('REDIS_HOST', 'localhost')
+
+search_cache = redis.StrictRedis(host=redis_host, port=6379, db=0)
+scrape_cache = redis.StrictRedis(host=redis_host, port=6379, db=1)
+
+celery_app = Celery('tasks', broker='redis://{host}'.format(host=redis_host))
+socketio = SocketIO(message_queue='redis://{host}'.format(host=redis_host))
 
 
 def search_cache_get(key, default=None):
@@ -92,8 +99,8 @@ def search_worker(query, sessionid, stopwords):
     frontend_results = query['data'].get('results')
     log.debug('Got results from API: {res}'.format(res=frontend_results))
 
-    apikey = os.environ["APIKEY"]
-    searcher = RFSearch_GoogleAPI(apikey, stopwords=stopwords, scrape_cache=scrape_cache)
+    searcher = RFSearch_GoogleAPI(apikey, stopwords=stopwords, scrape_cache=scrape_cache,
+            prerender_host=prerender_host, prerender_port=prerender_port)
 
     results = get_results(searcher, search_words, sessionid)
     items = results['items']

@@ -21,40 +21,23 @@ log = logging.getLogger(__name__)
 # TODO: Query results from 2016+.
 
 
-def scrape(url):
-    """
-    Scrape a web page using prerender.
-    Expects prerender to be running at port 3000.
-
-    :param url: URL
-    :return: text contents
-    """
-    page = requests.get('http://localhost:3000/' + url)
-    soup = BeautifulSoup(page.text, 'lxml')
-    [s.extract() for s in soup(['iframe', 'script', 'style'])]
-
-    page_content = soup.get_text()
-    if page_content:
-        log.info('Scraped {len} characters from URL: {url}'.format(len=len(page_content), url=url))
-    else:
-        log.warning('Unable to scrape any content for URL: %s' % url)
-
-    return page_content
-
-
 class RFSearch:
     """
     Relevance-feedback search abstract class.
     """
 
-    def __init__(self, stopwords=None, scrape_cache=None):
+    def __init__(self, stopwords=None, scrape_cache=None, prerender_host='localhost',
+            prerender_port='3000'):
         """
         :param stopwords: list of stopwords
         :param scrape_cache: redis instance to use as a cache for web pages, or None for not using cache
         """
+
         self.stopwords = set(stopwords or [])  # Using set for better time complexity for "x in stopwords"
         self.scrape_cache = scrape_cache
         self.scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
+        self.prerender_host = prerender_host
+        self.prerender_port = prerender_port
 
     def filter_words(self, words):
         filtered = [word for word in words if word not in self.stopwords]
@@ -63,6 +46,29 @@ class RFSearch:
 
     def search(self, words):
         pass
+
+    def scrape(self, url):
+        """
+        Scrape a web page using prerender.
+
+        :param url: URL
+        :return: text contents
+        """
+
+        page = requests.get('http://{host}:{port}/{url}'.format(
+            host=self.prerender_host,
+            port=self.prerender_port,
+            url=url))
+        soup = BeautifulSoup(page.text, 'lxml')
+        [s.extract() for s in soup(['iframe', 'script', 'style'])]
+
+        page_content = soup.get_text()
+        if page_content:
+            log.info('Scraped {len} characters from URL: {url}'.format(len=len(page_content), url=url))
+        else:
+            log.warning('Unable to scrape any content for URL: %s' % url)
+
+        return page_content
 
     def scrape_contents(self, documents):
         log.info('Scraping results')
@@ -82,7 +88,7 @@ class RFSearch:
             if not text_content:
                 log.debug('Scraping document %s:  %s' % (doc['name'], doc['url']))
 
-                text_content = scrape(doc['url'])
+                text_content = self.scrape(doc['url'])
                 if self.scrape_cache and text_content:
                     log.info('Adding page to scrape cache: %s' % (doc['url']))
                     self.scrape_cache.setex(doc['url'], self.scrape_cache_expire, text_content)
@@ -172,8 +178,10 @@ class RFSearch_GoogleAPI(RFSearch):
                  apikey='',
                  arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
                  stopwords=None,
-                 scrape_cache=None):
-        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache)
+                 scrape_cache=None,
+                 **kwargs):
+
+        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
         if arpa_url:
             self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
@@ -249,8 +257,9 @@ class RFSearch_GoogleUI(RFSearch):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', stopwords=None, scrape_cache=None):
-        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache)
+    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
+            stopwords=None, scrape_cache=None, **kwargs):
+        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
         self.num_results = 10
         if arpa_url:
             self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words

@@ -12,16 +12,6 @@ RUN pip install -r requirements.txt
 
 COPY src/ /app/
 
-EXPOSE 5000
+USER 1001
 
-ENV FLASK_APP api.py
-
-ARG API_KEY
-ARG HOST="0.0.0.0"
-ARG PORT="5000"
-
-ENV API_KEY ${API_KEY}
-ENV HOST ${HOST}
-ENV PORT ${PORT}
-
-CMD python api.py $API_KEY --host $HOST --port $PORT
+CMD celery -A tasks worker --loglevel=info
