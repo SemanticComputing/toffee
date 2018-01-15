@@ -46,7 +46,7 @@ def search_cache_update(key, value, expire=60 * 60 * 24):
     return search_cache.setex(key, expire, json.dumps(value))
 
 
-def get_results(searcher, words, sessionid):
+def fetch_results(searcher, words, sessionid):
     query_hash = sha1(' '.join(words).encode("utf-8")).hexdigest()
     cache_hit = search_cache_get(query_hash, {})
     items = cache_hit.get('items')
@@ -91,6 +91,20 @@ def get_topics(searcher, results, sessionid):
     return results, topic_words
 
 
+def get_results(searcher, words, sessionid):
+    results = fetch_results(searcher, words, sessionid)
+    items = results['items']
+
+    while words and not items:
+        # Try to get items by removing the last words
+        words.pop()
+
+        results = fetch_results(searcher, words, sessionid)
+        items = results['items']
+
+    return results
+
+
 @celery_app.task
 def search_worker(query, sessionid, stopwords):
     socketio.emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])}, room=sessionid)
@@ -104,13 +118,6 @@ def search_worker(query, sessionid, stopwords):
 
     results = get_results(searcher, search_words, sessionid)
     items = results['items']
-
-    while not items:
-        # Try to get items by removing the last words
-        search_words.pop()
-
-        results = get_results(searcher, search_words, sessionid)
-        items = results['items']
 
     if not frontend_results:
         socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
@@ -131,7 +138,7 @@ def search_worker(query, sessionid, stopwords):
             for topic, topic_weight in enumerate(item['topic']):
                 for word, weight in topic_words[topic]:
                     weight = float(weight)
-                    new_weight = topic_weight * weight * 100
+                    new_weight = topic_weight * weight * 500
                     log.info('Topic %s, word %s: %s' % (topic, word, new_weight))
 
                     new_word_weights[word] += weight * (1 if thumb else -1)
@@ -142,13 +149,6 @@ def search_worker(query, sessionid, stopwords):
 
     results = get_results(searcher, search_words, sessionid)
     items = results['items']
-
-    while not items:
-        # Try to get items by removing the last words
-        search_words.pop()
-
-        results = get_results(searcher, search_words, sessionid)
-        items = results['items']
 
     socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
     socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
