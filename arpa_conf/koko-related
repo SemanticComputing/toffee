@@ -1,0 +1,24 @@
+{
+  "name" : "koko-related",
+  "endpointURL" : "http://api.finto.fi/sparql",
+  "lasLocale" : "fi",
+  "queryUsingOriginalForm" : true,
+  "queryUsingBaseform" : true,
+  "queryUsingInflections" : [ "V N Nom Sg", "N Nom Pl", "A Pos Nom Pl" ],
+  "queryModifyingEveryPart" : true,
+  "queryModifyingOnlyLastPart" : false,
+  "positiveLASFilters" : {
+    "UPOS" : [ "PROPN", "NOUN" ]
+  },
+  "negativeLASFilters" : {
+    "UPOS" : [ "PRON", "VERB", "ADJ", "ADV", "CONJ" ],
+    "PROPER" : [ "FIRST", "LAST" ]
+  },
+  "strongNegativeLASFilters" : {
+    "" : [ null ]
+  },
+  "guess" : true,
+  "query" : "PREFIX text: <http://jena.apache.org/text#>\nPREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\nPREFIX skos: <http://www.w3.org/2004/02/skos/core#>\n\nSELECT DISTINCT ?id ?label ?ngram ?relatedlabel {\n  VALUES ?ngram {\n     <VALUES> \n  }\n  FILTER(!regex(?ngram, \"^[0-9]+$\"))\n  BIND(STRLANG(LCASE(?ngram),\"fi\") AS ?label) \n  GRAPH <http://www.yso.fi/onto/koko/> {\n    ?id skos:prefLabel ?label .\n    ?id skos:broader|skos:broadMatch|skos:exactMatch|skos:closeMatch|skos:narrower|skos:narrowMatch? ?related .\n    \t\t  ?related skos:prefLabel ?relatedlbl .\n      \t\t  FILTER(LANG(?relatedlbl) = \"fi\") .\n    \t\t  BIND(STR(?relatedlbl) AS ?relatedlabel)\n  }\n}\n",
+  "depth" : 0,
+  "maxNGrams" : 3
+}
