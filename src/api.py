@@ -42,7 +42,8 @@ def search(query):
     log.info('Search API got query: %s' % query)
 
     if query:
-        search_worker.delay(query, request.sid, stopwords)
+        search_worker(query, request.sid, stopwords)
+        # search_worker.delay(query, request.sid, stopwords)
 
 
 if __name__ == "__main__":

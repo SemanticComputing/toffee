@@ -3,21 +3,22 @@
 """
 Relevance feedback search Celery tasks.
 """
+import eventlet
+eventlet.monkey_patch()
+
 import logging
 import os
 from hashlib import sha1
 from operator import itemgetter
 
-import eventlet
 import redis
-from celery import Celery
+from celery import Celery, chain, group
 from collections import defaultdict
 from flask import json
 from flask_socketio import SocketIO
 
 from search import RFSearch_GoogleAPI
 
-eventlet.monkey_patch()
 
 log = logging.getLogger(__name__)
 
@@ -31,8 +32,22 @@ redis_host = os.environ.get('REDIS_HOST', 'localhost')
 search_cache = redis.StrictRedis(host=redis_host, port=6379, db=0)
 scrape_cache = redis.StrictRedis(host=redis_host, port=6379, db=1)
 
+scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
+
 celery_app = Celery('tasks', broker='redis://{host}'.format(host=redis_host))
 socketio = SocketIO(message_queue='redis://{host}'.format(host=redis_host))
+
+stopwords = None
+with open('fin_stopwords.txt', 'r') as f:
+    stopwords = f.read().split()
+
+with open('eng_stopwords.txt', 'r') as f:
+    stopwords += f.read().split()
+
+stopwords += [str(num) for num in range(3000)]
+
+searcher = RFSearch_GoogleAPI(apikey, scrape_cache=scrape_cache, stopwords=stopwords,
+                              prerender_host=prerender_host, prerender_port=prerender_port)
 
 
 def search_cache_get(key, default=None):
@@ -46,7 +61,7 @@ def search_cache_update(key, value, expire=60 * 60 * 24):
     return search_cache.setex(key, expire, json.dumps(value))
 
 
-def fetch_results(searcher, words, sessionid):
+def fetch_results(words, sessionid):
     query_hash = sha1(' '.join(words).encode("utf-8")).hexdigest()
     cache_hit = search_cache_get(query_hash, {})
     items = cache_hit.get('items')
@@ -67,64 +82,94 @@ def fetch_results(searcher, words, sessionid):
     return results
 
 
-def get_topics(searcher, results, sessionid):
-    items = results.get('items')
-    query_hash = results.get('result_id')
+@celery_app.task
+def scrape_page(item, sessionid):
+    url = item['url']
+    log.debug('Scraping URL %s' % url)
+    socketio.emit('search_status_msg', {'data': 'Scraping'}, room=sessionid)
 
-    cache_hit = search_cache_get(query_hash, {})
+    text_content = None
+    if scrape_cache:
+        try:
+            cached_content = scrape_cache.get(url)
+            if cached_content:
+                text_content = str(cached_content)
+                log.info('Found page content (%s chars) from scrape cache: %s' % (len(text_content), url))
+        except TypeError:
+            pass
+
+    if not text_content:
+        log.debug('Scraping document %s:  %s' % (item['name'], url))
+
+        text_content = searcher.scrape(url)
+        if scrape_cache and text_content:
+            log.info('Adding page to scrape cache: %s' % (url))
+            scrape_cache.setex(url, scrape_cache_expire, text_content)
+
+    if text_content:
+        item['contents'] = text_content
+
+    return item
+
+
+@celery_app.task
+def get_topics(items, result_id, sessionid):
+    # items = results.get('items')
+    # query_hash = results.get('result_id')
+
+    cache_hit = search_cache_get(result_id, {})
     topic_words = cache_hit.get('topic_words')
+    results = cache_hit
 
     if topic_words:
         return results, topic_words
 
-    log.debug('Scraping for search id %s' % query_hash)
-    socketio.emit('search_status_msg', {'data': 'Scraping'}, room=sessionid)
-    items = searcher.scrape_contents(items)
+    # log.debug('Scraping for search id %s' % query_hash)
+    # socketio.emit('search_status_msg', {'data': 'Scraping'}, room=sessionid)
+    # items = searcher.scrape_contents(items)
 
-    log.debug('Topic modeling for search id %s' % query_hash)
+    import pprint
+    log.debug(pprint.pformat(items))
+
+    log.debug('Topic modeling for search id %s' % result_id)
     socketio.emit('search_status_msg', {'data': 'Topic modeling'}, room=sessionid)
     items, topic_words = searcher.topic_model(items)
 
     results.update({'items': items, 'topic_words': topic_words})
-    search_cache_update(query_hash, results)
+    search_cache_update(result_id, results)
 
     return results, topic_words
 
 
-def get_results(searcher, words, sessionid):
-    results = fetch_results(searcher, words, sessionid)
+@celery_app.task
+def get_results(words, sessionid):
+    log.debug('Get results with: {}, {}'.format(words, sessionid))
+    results = fetch_results(words, sessionid)
     items = results['items']
 
     while words and not items:
         # Try to get items by removing the last words
         words.pop()
 
-        results = fetch_results(searcher, words, sessionid)
+        results = fetch_results(words, sessionid)
         items = results['items']
 
-    return results
+    socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
+    socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
+
+    return items, results
 
 
 @celery_app.task
-def search_worker(query, sessionid, stopwords):
-    socketio.emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])}, room=sessionid)
-    search_words = query['data']['query'].split()
-    log.debug('Got search words from API: {words}'.format(words=search_words))
-    frontend_results = query['data'].get('results')
-    log.debug('Got results from API: {res}'.format(res=frontend_results))
-
-    searcher = RFSearch_GoogleAPI(apikey, stopwords=stopwords, scrape_cache=scrape_cache,
-            prerender_host=prerender_host, prerender_port=prerender_port)
-
-    results = get_results(searcher, search_words, sessionid)
-    items = results['items']
-
+def refine_words(search_words, frontend_results):
     if not frontend_results:
-        socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
-        socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
+        return search_words
 
-    results, topic_words = get_topics(searcher, results, sessionid)
-    items = results['items']
+    result_id = frontend_results.get('result_id')
+
+    cache_hit = search_cache_get(result_id, {})
+    topic_words = cache_hit.get('topic_words')
+    items = cache_hit.get('items')
 
     new_word_weights = defaultdict(int, zip(search_words, [1] * len(search_words)))
     if frontend_results:
@@ -147,14 +192,46 @@ def search_worker(query, sessionid, stopwords):
         search_words = new_search_words[:(max(5, len(search_words)))]
         log.info('New search words based on topic modeling and thumbs: %s' % (new_search_words,))
 
-    results = get_results(searcher, search_words, sessionid)
-    items = results['items']
+    return search_words
 
-    socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
-    socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
 
-    results, topic_words = get_topics(searcher, results, sessionid)
-    items = results['items']
+@celery_app.task
+def create_scrape_group(items, sessionid):
+    return group(scrape_page.si(item, sessionid) for item in items)
 
+
+@celery_app.task
+def emit_data_done(sessionid):
     socketio.emit('search_status_msg', {'data': 'Done'}, room=sessionid)
-    results.update({'items': items, 'topic_words': topic_words})
+
+
+def search_worker(query, sessionid, stopwords):
+    socketio.emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])}, room=sessionid)
+    search_words = query['data']['query'].split()
+    log.debug('Got search words from API: {words}'.format(words=search_words))
+    frontend_results = query['data'].get('results') or {}
+    log.debug('Got frontend results: {res}'.format(res=frontend_results))
+
+    result_id = frontend_results.get('result_id')
+
+    # searcher = RFSearch_GoogleAPI(apikey, stopwords=stopwords, scrape_cache=scrape_cache,
+    #         prerender_host=prerender_host, prerender_port=prerender_port)
+
+    # items, results = get_results(searcher, search_words, sessionid)
+
+    chain(refine_words.s(search_words, frontend_results) | get_results.s(sessionid) |
+                     create_scrape_group.s(sessionid) | get_topics.s(result_id, sessionid) |
+                     emit_data_done.si(sessionid))()
+
+    # if not frontend_results:
+    #     socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
+    #     socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
+    #
+    # results, topic_words = get_topics(searcher, results, sessionid)
+    # items = results['items']
+
+    # results = get_results(searcher, search_words, sessionid)
+    # items = results['items']
+
+    # results, topic_words = get_topics(searcher, results, sessionid)
+    # items = results['items']
