@@ -26,11 +26,11 @@ services:
     prerender:
         image: "magnetme/prerender-docker"
     arpa:
-        build: "https://github.com/SemanticComputing/arpa-docker.git"
+        image: "jiemakel/arpa:1.0"
         environment:
-            - analyze_address=http://las:9000/las/analyze
+            - ANALYZE_ADDRESS=http://las:9000/las/analyze
         volumes:
-            - ./arpa_conf/:/opt/arpa/services
+            - ./arpa_conf/:/opt/docker/services
         ports:
             - 19991:9000
     las:
