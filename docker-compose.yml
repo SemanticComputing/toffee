@@ -9,6 +9,7 @@ services:
             - REDIS_HOST=redis
             - PRERENDER_HOST=prerender
             - PRERENDER_PORT=3000
+            - ARPA_URL=http://arpa:9000/koko-related
         ports:
             - 5000:5000
     worker:
@@ -20,6 +21,7 @@ services:
             - REDIS_HOST=redis
             - PRERENDER_HOST=prerender
             - PRERENDER_PORT=3000
+            - ARPA_URL=http://arpa:9000/koko-related
         user: nobody
     redis:
         image: "redis:alpine"
@@ -31,9 +33,5 @@ services:
             - ANALYZE_ADDRESS=http://las:9000/las/analyze
         volumes:
             - ./arpa_conf/:/opt/docker/services
-        ports:
-            - 19991:9000
     las:
         image: "jiemakel/las-ws:1.1"
-        ports:
-            - 19990:9000

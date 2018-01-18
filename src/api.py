@@ -3,11 +3,13 @@
 """
 Relevance feedback search API.
 """
+
+import eventlet; eventlet.monkey_patch() # noqa
+
 import argparse
 import logging
 import os
 
-import eventlet
 from flask import Flask, request
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -25,8 +27,6 @@ log = logging.getLogger(__name__)
 
 search_cache = dict()
 
-eventlet.monkey_patch()
-
 
 # TODO: Cache scrape results separately
 # TODO: Cache everything to redis
@@ -41,9 +41,9 @@ def hello():
 def search(query):
     log.info('Search API got query: %s' % query)
 
-    if query:
-        search_worker(query, request.sid, stopwords)
-        # search_worker.delay(query, request.sid, stopwords)
+    search_worker.delay(query, request.sid)
+
+    log.info('Called task')
 
 
 if __name__ == "__main__":
@@ -56,16 +56,9 @@ if __name__ == "__main__":
 
     args = argparser.parse_args()
 
-    stopwords = None
-    with open('fin_stopwords.txt', 'r') as f:
-        stopwords = f.read().split()
-
-    with open('eng_stopwords.txt', 'r') as f:
-        stopwords += f.read().split()
-
-    stopwords += [str(num) for num in range(3000)]
-
     logging.basicConfig(level=getattr(logging, args.loglevel),
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    log.info('API Redis host: {}'.format(redis_host))
 
     socketio.run(app, host=args.host, port=args.port)

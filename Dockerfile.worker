@@ -14,4 +14,4 @@ COPY src/ /app/
 
 USER 1001
 
-CMD celery -A tasks worker --loglevel=info
+CMD celery -A tasks.celery_app worker -P eventlet -c 100 -l info

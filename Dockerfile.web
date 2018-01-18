@@ -24,4 +24,4 @@ ENV PORT ${PORT}
 
 USER 1001
 
-CMD python api.py $API_KEY --host ${HOST} --port ${PORT}
+CMD python api.py $API_KEY --host ${HOST} --port ${PORT} --loglevel DEBUG
