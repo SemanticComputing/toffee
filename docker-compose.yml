@@ -1,5 +1,9 @@
 version: '3'
 services:
+    frontend:
+        build: https://github.com/SemanticComputing/relevance-feedback-frontend.git#disable-search
+        ports:
+            - 3000:5000
     web:
         build:
             dockerfile: Dockerfile.web
