@@ -7,11 +7,12 @@ import eventlet; eventlet.monkey_patch() # noqa
 
 import logging
 import os
+import re
 from hashlib import sha1
 from operator import itemgetter
 
 import redis
-from celery import Celery, chain, group, chord
+from celery import Celery, chain
 from collections import defaultdict
 from flask import json
 from flask_socketio import SocketIO
@@ -107,6 +108,7 @@ def scrape_page(item, sessionid):
 
         text_content = searcher.scrape(url)
         if scrape_cache and text_content:
+            text_content = re.sub(r'\s+', ' ', text_content)
             log.info('Adding page to scrape cache: %s' % (url))
             scrape_cache.setex(url, scrape_cache_expire, text_content)
 
@@ -190,6 +192,11 @@ def emit_data_done(sessionid):
 
 
 @celery_app.task
+def combine_chunks(results):
+    return [item for chunk in results for item in chunk]
+
+
+@celery_app.task
 def search_worker(query, sessionid):
     search_words = query['data']['query'].split()
     log.info('Got search words from API: {words}'.format(words=search_words))
@@ -203,11 +210,7 @@ def search_worker(query, sessionid):
     refined_words = refine_words(search_words, frontend_results, result_id)
     items, results = get_results(refined_words, sessionid)
 
-    chain(group(scrape_page.si(item, sessionid) for item in items) | get_topics.s(result_id, sessionid) | emit_data_done.si(sessionid))()
-
-
-if __name__ == '__main__':
-    log.info('Worker Redis host: {}'.format(redis_host))
-    log.info('Worker ARPA url: {}'.format(arpa_url))
-    log.info('Worker Prerender host: {}'.format(prerender_host))
-    log.info('Worker Prerender port: {}'.format(prerender_port))
+    chain(scrape_page.chunks([(item, sessionid) for item in items], 10).group(),
+            combine_chunks.s(),
+            get_topics.s(result_id, sessionid),
+            emit_data_done.si(sessionid))()

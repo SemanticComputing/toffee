@@ -1,4 +1,4 @@
-version: '3'
+version: '3.5'
 services:
     frontend:
         build: https://github.com/SemanticComputing/relevance-feedback-frontend.git#disable-search
@@ -30,7 +30,9 @@ services:
     redis:
         image: "redis:alpine"
     prerender:
-        image: "magnetme/prerender-docker"
+        build: https://github.com/SemanticComputing/prerender-docker.git
+        shm_size: "5gb"
+
     arpa:
         image: "jiemakel/arpa:1.0"
         environment:
