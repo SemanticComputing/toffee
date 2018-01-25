@@ -76,7 +76,7 @@ def fetch_results(words, sessionid):
 
     words = searcher.filter_words(words)
     expanded = searcher.combine_expanded(searcher.word_expander(words))
-    socketio.emit('search_words', {'data': ' '.join(expanded)}, room=sessionid)
+    socketio.emit('search_words', {'data': expanded}, room=sessionid)
     items = searcher.search(expanded, expand_words=False)
 
     log.debug('Got %s results through search' % len(items))
