@@ -14,19 +14,19 @@ from flask import Flask, request
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
-from tasks import search_worker
+from celery import Celery
 
 app = Flask(__name__)
 CORS(app)
 
 redis_host = os.environ.get('REDIS_HOST', '')
 
+celery_app = Celery('tasks', broker='redis://{host}'.format(host=redis_host),
+        backend='redis://{host}'.format(host=redis_host))
+
 socketio = SocketIO(app, ping_timeout=600, message_queue='redis://{host}'.format(host=redis_host))
 
 log = logging.getLogger(__name__)
-
-search_cache = dict()
-
 
 # TODO: Cache scrape results separately
 # TODO: Cache everything to redis
@@ -41,7 +41,7 @@ def hello():
 def search(query):
     log.info('Search API got query: %s' % query)
 
-    search_worker.delay(query, request.sid)
+    celery_app.send_task('tasks.search_worker', (query, request.sid))
 
     log.info('Called task')
 

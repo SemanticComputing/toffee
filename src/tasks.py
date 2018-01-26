@@ -55,6 +55,8 @@ searcher = RFSearch_GoogleAPI(apikey, scrape_cache=scrape_cache, stopwords=stopw
 
 
 def search_cache_get(key, default=None):
+    if key is None:
+        return default
     try:
         return json.loads(search_cache.get(key))
     except TypeError:
@@ -62,16 +64,23 @@ def search_cache_get(key, default=None):
 
 
 def search_cache_update(key, value, expire=60 * 60 * 24):
+    if key is None:
+        raise ValueError('Tried to update cache with None as key')
     return search_cache.setex(key, expire, json.dumps(value))
 
 
+def get_query_hash(words):
+    return sha1(' '.join(words).encode("utf-8")).hexdigest()
+
+
 def fetch_results(words, sessionid):
-    query_hash = sha1(' '.join(words).encode("utf-8")).hexdigest()
+    query_hash = get_query_hash(words)
     cache_hit = search_cache_get(query_hash, {})
     items = cache_hit.get('items')
 
     if items:
         log.info('Cache hit for search id %s' % query_hash)
+        socketio.emit('search_words', {'data': cache_hit.get('words')}, room=sessionid)
         return cache_hit
 
     words = searcher.filter_words(words)
@@ -81,7 +90,7 @@ def fetch_results(words, sessionid):
 
     log.debug('Got %s results through search' % len(items))
 
-    results = {'result_id': query_hash, 'items': items}
+    results = {'result_id': query_hash, 'items': items, 'words': words}
     search_cache_update(query_hash, results)
     return results
 
@@ -143,7 +152,7 @@ def get_results(words, sessionid):
 
     while words and not items:
         # Try to get items by removing the last words
-        words.pop()
+        words = words[:-1]
 
         results = fetch_results(words, sessionid)
         items = results['items']
@@ -199,13 +208,15 @@ def combine_chunks(results):
 @celery_app.task
 def search_worker(query, sessionid):
     search_words = query['data']['query'].split()
+    if len(search_words) == 0:
+        return
     log.info('Got search words from API: {words}'.format(words=search_words))
     socketio.emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])}, room=sessionid)
 
     frontend_results = query['data'].get('results') or {}
     log.debug('Got frontend results: {res}'.format(res=frontend_results))
 
-    result_id = query['data'].get('result_id')
+    result_id = query['data'].get('result_id') or get_query_hash(search_words)
 
     refined_words = refine_words(search_words, frontend_results, result_id)
     items, results = get_results(refined_words, sessionid)
