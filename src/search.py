@@ -104,7 +104,7 @@ class RFSearch:
         vectorizer = CountVectorizer(stop_words=list(self.stopwords))
         data_corpus = [r.get('contents', '') for r in documents]
 
-        if len(documents) <= 1 or not any(data_corpus):
+        if len(documents) < 3 or not any(data_corpus):
             log.error('Not enough documents for topic modeling, or corpus empty.')
             return documents, [[]]
 
@@ -113,7 +113,7 @@ class RFSearch:
 
         n_topics = 1 + min(len(documents) // 3, 11)
 
-        model = lda.LDA(n_topics=n_topics, n_iter=1500, random_state=1)
+        model = lda.LDA(n_topics=n_topics, n_iter=500, random_state=1)
         model.fit(X)
         topic_word = model.topic_word_
         n_top_words = 10
@@ -157,7 +157,7 @@ class SearchExpanderArpa:
         expanded = []
         for word in words:
             if ' OR ' in word:
-                expanded.append(word)
+                expanded.append((word,))
                 continue
 
             data = {'text': word}
@@ -167,7 +167,9 @@ class SearchExpanderArpa:
             related = [item for sublist in related for item in set(sublist)]
             related = [x if ' ' in x else x.strip('"') for x in related]
 
-            expanded.append(tuple(set(related + [word]))[:self.max_expanded])
+            if word not in related:
+                related = [word] + related
+            expanded.append(related[:self.max_expanded])
 
         log.info('Expanded from %s words to %s words' % (len(words), len([x for y in expanded for x in y])))
 

@@ -41,3 +41,5 @@ services:
             - ./arpa_conf/:/opt/docker/services
     las:
         image: "jiemakel/las-ws:1.1"
+        ports:
+            - 9000:9000
