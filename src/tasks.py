@@ -74,6 +74,8 @@ def get_query_hash(words):
 
 
 def fetch_results(words, sessionid):
+    socketio.emit('search_words', {'data': words}, room=sessionid)
+
     query_hash = get_query_hash(words)
     cache_hit = search_cache_get(query_hash, {})
     items = cache_hit.get('items')
@@ -83,10 +85,7 @@ def fetch_results(words, sessionid):
         socketio.emit('search_words', {'data': cache_hit.get('words')}, room=sessionid)
         return cache_hit
 
-    words = searcher.filter_words(words)
-    expanded = searcher.combine_expanded(searcher.word_expander(words))
-    socketio.emit('search_words', {'data': expanded}, room=sessionid)
-    items = searcher.search(expanded, expand_words=False)
+    items = searcher.search(words, expand_words=False)
 
     log.debug('Got %s results through search' % len(items))
 
@@ -147,6 +146,7 @@ def get_topics(items, result_id, sessionid):
 @celery_app.task
 def get_results(words, sessionid):
     log.debug('Get results with: {}, {}'.format(words, sessionid))
+
     results = fetch_results(words, sessionid)
     items = results['items']
 
@@ -164,15 +164,19 @@ def get_results(words, sessionid):
 
 
 @celery_app.task
-def refine_words(search_words, frontend_results, result_id):
+def refine_words(words, frontend_results, result_id):
+    words = searcher.filter_words(words)
+    words = searcher.combine_expanded(searcher.word_expander(words))
+    log.info('Expanded search words: {}'.format(words))
+
     if not len(frontend_results):
-        return search_words
+        return words
 
     cache_hit = search_cache_get(result_id, {})
     topic_words = cache_hit.get('topic_words')
     items = cache_hit.get('items')
 
-    new_word_weights = defaultdict(int, zip(search_words, [1] * len(search_words)))
+    new_word_weights = defaultdict(int, zip(words, [1] * len(words)))
     for item in items:
         url = item['url']
         thumb = next((res.get('thumb') for res in frontend_results if res.get('url') == url), None)
@@ -186,13 +190,13 @@ def refine_words(search_words, frontend_results, result_id):
                 new_weight = topic_weight * weight * 500
                 log.info('Topic %s, word %s: %s' % (topic, word, new_weight))
 
-                new_word_weights[word] += weight * (1 if thumb else -1)
+                new_word_weights[word] += weight * (1 if thumb else -2)
 
         new_search_words, _ = zip(*sorted(new_word_weights.items(), key=itemgetter(1), reverse=True))
-        search_words = new_search_words[:(max(5, len(search_words)))]
+        words = new_search_words[:(max(5, len(words)))]
         log.info('New search words based on topic modeling and thumbs: %s' % (new_search_words,))
 
-    return search_words
+    return words
 
 
 @celery_app.task
@@ -210,6 +214,7 @@ def search_worker(query, sessionid):
     search_words = query['data']['query'].split()
     if len(search_words) == 0:
         return
+
     log.info('Got search words from API: {words}'.format(words=search_words))
     socketio.emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])}, room=sessionid)
 
