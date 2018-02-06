@@ -200,6 +200,9 @@ def refine_words(words, frontend_results, query_hash):
     topic_words = cache_hit.get('topic_words')
     items = cache_hit.get('items', [])
 
+    log.info('Got items from cache: {}'.format(items))
+    # TODO: Item indexes do not always match thumbs
+
     new_word_weights = defaultdict(int, zip(words, [1] * len(words)))  # Initialized with old search words
 
     # Loop through each result and modify word weights based on its topics' words, if it has been thumbed
