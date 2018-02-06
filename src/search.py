@@ -142,7 +142,7 @@ class SearchExpanderArpa:
     Search expander class using ARPA.
     """
 
-    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', max_expanded=3):
+    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', max_expanded=6):
         self.arpa_url = arpa_url
         self.max_expanded = max_expanded
 
