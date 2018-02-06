@@ -189,6 +189,9 @@ def expand_words(words):
 
 @celery_app.task
 def refine_words(words, frontend_results, query_hash):
+    """
+    Refine the search query based on user feedback (thumbs up and down)
+    """
     log.info('Refine words got initial words: {}'.format(words))
     if not len(frontend_results):
         return words
@@ -197,7 +200,9 @@ def refine_words(words, frontend_results, query_hash):
     topic_words = cache_hit.get('topic_words')
     items = cache_hit.get('items', [])
 
-    new_word_weights = defaultdict(int, zip(words, [1] * len(words)))
+    new_word_weights = defaultdict(int, zip(words, [1] * len(words)))  # Initialized with old search words
+
+    # Loop through each result and modify word weights based on its topics' words, if it has been thumbed
     for item in items:
         url = item['url']
         thumb = next((res.get('thumb') for res in frontend_results if res.get('url') == url), None)
@@ -205,11 +210,11 @@ def refine_words(words, frontend_results, query_hash):
         if 'topic' not in item or thumb is None:
             continue
 
+        # Loop through topics and their words
         for topic, topic_weight in enumerate(item['topic']):
             for word, weight in topic_words[topic]:
-                weight = float(weight)
-                new_weight = topic_weight * weight * 1000
-                log.info('Topic %s, word %s: %s' % (topic, word, new_weight))
+                weight = topic_weight * float(weight) * 1000
+                log.info('Topic %s, word %s: %s' % (topic, word, weight))
 
                 new_word_weights[word] += weight * (1 if thumb else -5)
 
