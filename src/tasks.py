@@ -17,6 +17,8 @@ from collections import defaultdict
 from flask import json
 from flask_socketio import SocketIO
 
+from arpa_linker.arpa import post
+
 from search import RFSearch_GoogleAPI
 
 
