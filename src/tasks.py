@@ -211,7 +211,7 @@ def refine_words(words, frontend_results, query_hash):
                 new_weight = topic_weight * weight * 1000
                 log.info('Topic %s, word %s: %s' % (topic, word, new_weight))
 
-                new_word_weights[word] += weight * (1 if thumb else -1)
+                new_word_weights[word] += weight * (1 if thumb else -5)
 
         # TODO: Expand new words to make them match old expanded words, use intersection to match
 
