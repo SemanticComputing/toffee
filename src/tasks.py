@@ -202,7 +202,7 @@ def refine_words(words, frontend_results, query_hash):
         url = item['url']
         thumb = next((res.get('thumb') for res in frontend_results if res.get('url') == url), None)
 
-        if 'topic' not in item or not thumb:
+        if 'topic' not in item or thumb is None:
             continue
 
         for topic, topic_weight in enumerate(item['topic']):
