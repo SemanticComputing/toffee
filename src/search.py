@@ -166,9 +166,9 @@ class SearchExpanderArpa:
 
             related = [match['properties'].get('relatedlabel', '') for match in query_result['results']]
             related = [item for sublist in related for item in set(sublist)]
-            related = [x if ' ' in x else x.strip('"') for x in related if x != word]
+            related = [x if ' ' in x else x.strip('"') for x in related]
 
-            related = [word] + related
+            related = [word] + [x for x in related if x != word]
             expanded.append(related[:self.max_expanded])
 
         log.info('Expanded from %s words to %s words' % (len(words), len([x for y in expanded for x in y])))
