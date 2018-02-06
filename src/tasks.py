@@ -216,7 +216,7 @@ def refine_words(words, frontend_results, query_hash):
         # Loop through topics and their words
         for topic, topic_weight in enumerate(item['topic']):
             for word, weight in topic_words[topic]:
-                weight = topic_weight * float(weight) * 1000
+                weight = topic_weight * float(weight) * 500
                 log.info('Topic %s, word %s: %s' % (topic, word, weight))
 
                 # Match word to existing expanded words in a non-robust way:
@@ -224,7 +224,7 @@ def refine_words(words, frontend_results, query_hash):
                     if word in existing.split(' OR '):
                         word = existing
 
-                new_word_weights[word] += weight * (1 if thumb else -5)
+                new_word_weights[word] += weight * (1 if thumb else -1)
 
         new_search_words, _ = zip(*sorted(new_word_weights.items(), key=itemgetter(1), reverse=True))
         log.info('New search words based on topic modeling and thumbs: %s' %
