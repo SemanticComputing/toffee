@@ -195,7 +195,7 @@ def refine_words(words, frontend_results, query_hash):
 
     cache_hit = search_cache_get(query_hash, {})
     topic_words = cache_hit.get('topic_words')
-    items = cache_hit.get('items')
+    items = cache_hit.get('items', [])
 
     new_word_weights = defaultdict(int, zip(words, [1] * len(words)))
     for item in items:
