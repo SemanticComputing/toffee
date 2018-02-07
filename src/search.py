@@ -143,9 +143,8 @@ class SearchExpanderArpa:
     Search expander class using ARPA.
     """
 
-    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related', max_expanded=6):
+    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
         self.arpa_url = arpa_url
-        self.max_expanded = max_expanded
 
     def expand_words(self, words):
         """
@@ -159,10 +158,12 @@ class SearchExpanderArpa:
         expanded = []
         for word in words:
             if ' OR ' in word:
+                log.info('Skipping expansion for already expanded term {}'.format(word))
                 expanded.append((word,))
                 continue
 
             data = {'text': word}
+            log.info('Expanding {}'.format(word))
             query_result = post(self.arpa_url, data, retries=3, wait=1)
 
             related = [match['properties'].get('relatedlabel', '') for match in query_result['results']]
@@ -170,7 +171,7 @@ class SearchExpanderArpa:
             related = [x if ' ' in x else x.strip('"') for x in related]
 
             related = [word] + [x for x in related if x != word]
-            expanded.append(related[:self.max_expanded])
+            expanded.append(related)
 
         log.info('Expanded from %s words to %s words' % (len(words), len([x for y in expanded for x in y])))
 

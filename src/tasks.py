@@ -179,9 +179,17 @@ def get_results(words, sessionid):
     return items, results
 
 
-def expand_words(words):
+def expand_words(words, banned_words):
     words = searcher.filter_words(words)
-    words = searcher.combine_expanded(searcher.word_expander(words))
+    words = searcher.word_expander(words)
+    filtered_words = []
+    if banned_words:
+        log.info('Remove banned words: {}'.format(banned_words))
+    for chunk in words:
+        filtered_words += [word for word in chunk if word not in banned_words][:6]
+    words = filtered_words
+
+    words = searcher.combine_expanded(words)
     log.info('Expanded search words: {}'.format(words))
 
     return words
@@ -263,8 +271,10 @@ def baseform_contents(text):
 @celery_app.task
 def search_worker(query, sessionid):
     search_words = query['data'].get('words') or query['data']['query'].split()
-    if len(search_words) == 0:
+    if not search_words:
         return
+
+    banned_words = query['data'].get('banned_words')
 
     log.info('Got search words from API: {words}'.format(words=search_words))
     socketio.emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])}, room=sessionid)
@@ -273,7 +283,7 @@ def search_worker(query, sessionid):
     log.debug('Got frontend results: {res}'.format(res=frontend_results))
 
     refined_words = refine_words(search_words, frontend_results)
-    refined_words = expand_words(refined_words)
+    refined_words = expand_words(refined_words, banned_words)
 
     items, results = get_results(refined_words, sessionid)
 
