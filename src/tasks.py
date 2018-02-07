@@ -188,36 +188,44 @@ def expand_words(words):
 
 
 @celery_app.task
-def refine_words(words, frontend_results, query_hash):
+def refine_words(words, frontend_results):
     """
     Refine the search query based on user feedback (thumbs up and down)
     """
+
     log.info('Refine words got initial words: {}'.format(words))
-    if not len(frontend_results):
+
+    if not frontend_results:
+        log.info('No thumbs received')
         return words
 
+    query_hash = get_query_hash(words)
     cache_hit = search_cache_get(query_hash, {})
     topic_words = cache_hit.get('topic_words')
-    items = cache_hit.get('items', [])
+    documents = cache_hit.get('items', [])
 
-    log.info('Got items from cache: {}'.format(items))
-    # TODO: Item indexes do not always match thumbs
+    if not topic_words:
+        log.warn('No topic words found for {}'.format(query_hash))
+        return words
 
     new_word_weights = defaultdict(int, zip(words, [1] * len(words)))  # Initialized with old search words
 
     # Loop through each result and modify word weights based on its topics' words, if it has been thumbed
-    for item in items:
-        url = item['url']
-        thumb = next((res.get('thumb') for res in frontend_results if res.get('url') == url), None)
+    for result in [res for res in frontend_results if res.get('thumb') is not None]:
+        url = result['url']
+        thumb = result['thumb']
+        topics = next(document.get('topic') for document in documents if document['url'] == url)
+        log.info('Weighting {url} {thumb} {topics}'.format(url=url, thumb=thumb, topics=topics))
 
-        if 'topic' not in item or thumb is None:
+        if not topics:
+            log.warn('No topics found for {}'.format(url))
             continue
 
         # Loop through topics and their words
-        for topic, topic_weight in enumerate(item['topic']):
-            for word, weight in topic_words[topic]:
-                weight = topic_weight * float(weight) * 500
-                log.info('Topic %s, word %s: %s' % (topic, word, weight))
+        for topic, topic_weight in enumerate(topics):
+            for word, weight_in_topic in topic_words[topic]:
+                weight = topic_weight * float(weight_in_topic) * 50
+                log.info('Topic %s, word %s: %.10f -> %.10f' % (topic, word, weight_in_topic, weight))
 
                 # Match word to existing expanded words in a non-robust way:
                 for existing in new_word_weights.keys():
@@ -226,10 +234,10 @@ def refine_words(words, frontend_results, query_hash):
 
                 new_word_weights[word] += weight * (1 if thumb else -1)
 
-        new_search_words, _ = zip(*sorted(new_word_weights.items(), key=itemgetter(1), reverse=True))
-        log.info('New search words based on topic modeling and thumbs: %s' %
-                 sorted(new_word_weights.items(), key=itemgetter(1), reverse=True)[:10])
-        words = new_search_words[:(max(5, len(words)))]
+    new_search_words, _ = zip(*sorted(new_word_weights.items(), key=itemgetter(1), reverse=True))
+    log.info('New search words based on topic modeling and thumbs: %s' %
+                sorted(new_word_weights.items(), key=itemgetter(1), reverse=True)[:10])
+    words = new_search_words[:(max(5, len(words)))]
 
     return words
 
@@ -241,6 +249,8 @@ def emit_data_done(sessionid):
 
 @celery_app.task
 def combine_chunks(results):
+    if not results or type(results[0]) == dict:
+        return results
     return [item for chunk in results for item in chunk]
 
 
@@ -262,11 +272,12 @@ def search_worker(query, sessionid):
     frontend_results = query['data'].get('results') or {}
     log.debug('Got frontend results: {res}'.format(res=frontend_results))
 
-    search_words = expand_words(search_words)
-    query_hash = get_query_hash(search_words)
+    refined_words = refine_words(search_words, frontend_results)
+    refined_words = expand_words(refined_words)
 
-    refined_words = refine_words(search_words, frontend_results, query_hash)
     items, results = get_results(refined_words, sessionid)
+
+    query_hash = get_query_hash(refined_words)
 
     chain(scrape_page.chunks([(item, sessionid) for item in items], 10).group(),
             combine_chunks.s(),

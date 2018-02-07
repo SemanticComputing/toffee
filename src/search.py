@@ -6,6 +6,7 @@ Relevance feedback search using semantic knowledge and topic modeling.
 import argparse
 import logging
 
+import math
 import lda
 import numpy as np
 import requests
@@ -111,8 +112,8 @@ class RFSearch:
         X = vectorizer.fit_transform(data_corpus)
         vocab = vectorizer.get_feature_names()
 
-        n_topics = 1 + min(len(documents) // 4, 9)
         # TODO: This could be approximated using path length of terms in KOKO
+        n_topics = 1 + min(round(2 * math.sqrt(len(documents))), 9)
 
         model = lda.LDA(n_topics=n_topics, n_iter=500, random_state=1)
         model.fit(X)
