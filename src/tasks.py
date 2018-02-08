@@ -87,7 +87,6 @@ def fetch_results(words, sessionid):
 
     if items:
         log.info('Cache hit for search id %s' % query_hash)
-        # socketio.emit('search_words', {'data': cache_hit.get('words')}, room=sessionid)
         return cache_hit
 
     items = searcher.search(words, expand_words=False)
@@ -155,6 +154,7 @@ def get_topics(items, query_hash, sessionid):
         search_cache_update(query_hash, results)
 
     log.info('Topic words: {}'.format(topic_words))
+    socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
 
     return results, topic_words
 
@@ -322,7 +322,7 @@ def search_worker(query, sessionid):
 
     query_hash = get_query_hash(refined_words)
 
-    chain(scrape_page.chunks([(item, sessionid) for item in items], 10).group(),
+    chain(scrape_page.chunks([(item, sessionid) for item in items], 20).group(),
             combine_chunks.s(),
             get_topics.s(query_hash, sessionid),
             emit_data_done.si(sessionid))()
