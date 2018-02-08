@@ -208,6 +208,8 @@ def expand_words(words, banned_words):
     >>> searcher.word_expander = MagicMock(side_effect=lambda words: [tuple([word] + ['o%s' % x for x in range(10)]) for word in words])
     >>> expand_words(words, [])
     ['innovaatio OR o0 OR o1 OR o2 OR o3 OR o4', 'teknologia OR o0 OR o1 OR o2 OR o3 OR o4']
+    >>> expand_words(words, ['o2', 'o4'])
+    ['innovaatio OR o0 OR o1 OR o3 OR o5 OR o6', 'teknologia OR o0 OR o1 OR o3 OR o5 OR o6']
     """
 
     log.info('Expand words: {words}; remove banned words: {banned_words}'.format(words=words, banned_words=banned_words))
