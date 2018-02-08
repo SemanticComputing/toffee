@@ -180,13 +180,44 @@ def get_results(words, sessionid):
 
 
 def expand_words(words, banned_words):
+    """
+    >>> from unittest.mock import MagicMock
+    >>> searcher.filter_words = MagicMock(side_effect=lambda x: x)
+    >>> searcher.word_expander = MagicMock(side_effect=lambda words: [(word,) for word in words])
+
+    >>> words = ['innovaatio', 'teknologia']
+    >>> expand_words(words, [])
+    ['innovaatio', 'teknologia']
+
+    >>> words = ['innovaatio OR something', 'teknologia']
+    >>> expand_words(words, [])
+    ['innovaatio OR something', 'teknologia']
+
+    >>> words = ['innovaatio OR something', 'teknologia']
+    >>> expand_words(words, ['innovaatio'])
+    ['something', 'teknologia']
+    >>> expand_words(words, ['teknologia'])
+    ['innovaatio OR something']
+
+    >>> searcher.word_expander = MagicMock(side_effect=lambda words: [(word, 'other') for word in words])
+    >>> words = ['innovaatio', 'teknologia']
+    >>> expand_words(words, [])
+    ['innovaatio OR other', 'teknologia OR other']
+    >>> expand_words(words, ['other'])
+    ['innovaatio', 'teknologia']
+    >>> searcher.word_expander = MagicMock(side_effect=lambda words: [tuple([word] + ['o%s' % x for x in range(10)]) for word in words])
+    >>> expand_words(words, [])
+    ['innovaatio OR o0 OR o1 OR o2 OR o3 OR o4', 'teknologia OR o0 OR o1 OR o2 OR o3 OR o4']
+    """
+
+    log.info('Expand words: {words}; remove banned words: {banned_words}'.format(words=words, banned_words=banned_words))
     words = searcher.filter_words(words)
     words = searcher.word_expander(words)
     filtered_words = []
-    if banned_words:
-        log.info('Remove banned words: {}'.format(banned_words))
     for chunk in words:
-        filtered_words += [word for word in chunk if word not in banned_words][:6]
+        chunk = [word for w in chunk for word in w.split(' OR ') if word not in banned_words][:6]
+        if chunk:
+            filtered_words.append(chunk)
     words = filtered_words
 
     words = searcher.combine_expanded(words)
@@ -293,3 +324,8 @@ def search_worker(query, sessionid):
             combine_chunks.s(),
             get_topics.s(query_hash, sessionid),
             emit_data_done.si(sessionid))()
+
+
+if __name__ == '__main__':
+    import doctest
+    doctest.testmod()
