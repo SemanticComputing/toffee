@@ -286,6 +286,7 @@ def refine_words(words, frontend_results):
 @celery_app.task
 def emit_data_done(sessionid):
     socketio.emit('search_status_msg', {'data': 'Done'}, room=sessionid)
+    socketio.emit('search_processing_finished', {'data': None}, room=sessionid)
 
 
 @celery_app.task
