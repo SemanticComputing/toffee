@@ -311,7 +311,6 @@ def search_worker(query, sessionid):
     banned_words = query['data'].get('banned_words')
 
     log.info('Got search words from API: {words}'.format(words=search_words))
-    socketio.emit('search_status_msg', {'data': 'Search with {}'.format(query['data'])}, room=sessionid)
 
     frontend_results = query['data'].get('results') or {}
     log.debug('Got frontend results: {res}'.format(res=frontend_results))
