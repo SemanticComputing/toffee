@@ -99,10 +99,8 @@ def fetch_results(words, sessionid):
 
 
 @celery_app.task
-def scrape_page(item, sessionid):
-    log.info('Scrape: {}'.format(item))
-    url = item['url']
-    log.debug('Scraping URL %s' % url)
+def scrape_page(url, sessionid):
+    log.info('Scrape: {}'.format(url))
     socketio.emit('search_status_msg', {'data': 'Scraping'}, room=sessionid)
 
     text_content = None
@@ -116,7 +114,7 @@ def scrape_page(item, sessionid):
             pass
 
     if not text_content:
-        log.debug('Scraping document %s:  %s' % (item['name'], url))
+        log.debug('Scraping document %s' % url)
 
         text_content = searcher.scrape(url)
         log.info('Scraped content length: {}'.format(len(text_content)))
@@ -128,10 +126,7 @@ def scrape_page(item, sessionid):
             log.info('Adding page to scrape cache: %s' % (url))
             scrape_cache.setex(url, scrape_cache_expire, text_content)
 
-    if text_content:
-        item['contents'] = text_content
-
-    return item
+    return {'url': url, 'content': text_content}
 
 
 @celery_app.task
@@ -290,10 +285,15 @@ def emit_data_done(sessionid):
 
 
 @celery_app.task
-def combine_chunks(results):
-    if not results or type(results[0]) == dict:
-        return results
-    return [item for chunk in results for item in chunk]
+def combine_chunks(results, items):
+    if not results:
+        return items
+    if type(results[0]) != dict:
+        results = [item for chunk in results for item in chunk]
+    results = {item['url']: item['content'] for item in results}
+    for item in items:
+        item['content'] = results.get(item['url'])
+    return items
 
 
 def baseform_contents(text):
@@ -322,8 +322,8 @@ def search_worker(query, sessionid):
 
     query_hash = get_query_hash(refined_words)
 
-    chain(scrape_page.chunks([(item, sessionid) for item in items], 20).group(),
-            combine_chunks.s(),
+    chain(scrape_page.chunks([(item['url'], sessionid) for item in items], 20).group(),
+            combine_chunks.s(items),
             get_topics.s(query_hash, sessionid),
             emit_data_done.si(sessionid))()
 
