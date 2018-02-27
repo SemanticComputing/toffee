@@ -32,7 +32,6 @@ services:
     prerender:
         build: https://github.com/SemanticComputing/prerender-docker.git#relevance-feedback
         shm_size: "5gb"
-
     arpa:
         image: "jiemakel/arpa:1.0"
         environment:
@@ -43,3 +42,8 @@ services:
         image: "jiemakel/las-ws:1.1"
         ports:
             - 9000:9000
+    elastic:
+        build: "https://github.com/SemanticComputing/news-reader-text-index.git"
+        ports:
+            - 9200:9200
+            - 9300:9300

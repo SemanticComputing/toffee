@@ -41,7 +41,7 @@ def hello():
 def search(query):
     log.info('Search API got query: %s' % query)
 
-    celery_app.send_task('tasks.search_worker', (query, request.sid))
+    celery_app.send_task('tasks.search_worker_elastic', (query, request.sid))
 
     log.info('Called task')
 

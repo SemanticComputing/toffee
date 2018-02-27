@@ -29,17 +29,25 @@ class RFSearch:
     """
 
     def __init__(self, stopwords=None, scrape_cache=None, prerender_host='localhost',
-            prerender_port='3000'):
+            prerender_port='3000', arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
         """
         :param stopwords: list of stopwords
         :param scrape_cache: redis instance to use as a cache for web pages, or None for not using cache
         """
 
+        if arpa_url:
+            self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
+        else:
+            self.word_expander = lambda words: [(word,) for word in words]
         self.stopwords = set(stopwords or [])  # Using set for better time complexity for "x in stopwords"
         self.scrape_cache = scrape_cache
         self.scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
         self.prerender_host = prerender_host
         self.prerender_port = prerender_port
+
+    @staticmethod
+    def combine_expanded(expanded):
+        return [' OR '.join(wordset) for wordset in expanded]
 
     def filter_words(self, words):
         filtered = [word for word in words if word not in self.stopwords]
@@ -136,6 +144,9 @@ class RFSearch:
         for (doc, topic) in zip(documents, doc_topics):
             doc['topic'] = topic.tolist()
 
+        import pprint
+        log.info(pprint.pformat(documents[:5]))
+
         return documents, topics_words
 
 
@@ -186,21 +197,11 @@ class RFSearchGoogleAPI(RFSearch):
 
     def __init__(self,
                  apikey='',
-                 arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
-                 stopwords=None,
                  scrape_cache=None,
                  **kwargs):
 
-        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
+        super().__init__(scrape_cache=scrape_cache, **kwargs)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
-        if arpa_url:
-            self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
-        else:
-            self.word_expander = lambda words: [(word,) for word in words]
-
-    @staticmethod
-    def combine_expanded(expanded):
-        return [' OR '.join(wordset) for wordset in expanded]
 
     def search(self, words, expand_words=True):
         """
@@ -267,14 +268,9 @@ class RFSearchGoogleUI(RFSearch):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
-            stopwords=None, scrape_cache=None, **kwargs):
+    def __init__(self, stopwords=None, scrape_cache=None, **kwargs):
         super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
         self.num_results = 10
-        if arpa_url:
-            self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
-        else:
-            self.word_expander = lambda words: [(word,) for word in words]
 
     @staticmethod
     def combine_expanded(words):
@@ -314,13 +310,17 @@ class RFSearchElastic(RFSearch):
     def __init__(self,
                  stopwords=None,
                  scrape_cache=None,
-                 elastic_nodes=[{'host': 'localhost', 'port': 9200}],
+                 elastic_nodes=[{'host': 'elastic', 'port': 9200}],
                  elastic_index='ylenews',
                  **kwargs):
 
         super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
         self.es = Elasticsearch(elastic_nodes)
         self.es_index = elastic_index
+
+    @staticmethod
+    def format_query(words):
+        return '({})'.format(') ('.join(words))
 
     def search(self, words, expand_words=False):
         """
@@ -330,14 +330,12 @@ class RFSearchElastic(RFSearch):
         :param expand_words:
         :return:
         """
-        query = ' '.join(words)
-        while len(query) > 2500:
-            words.pop()
-            query = ' '.join(words)
+        query = self.format_query(words)
 
         log.info(f'Query: {query}')
 
-        res = self.es.search(index=self.es_index, body={"query": {"query_string": {"query": query}}})
+        # Make search
+        res = self.es.search(index=self.es_index, body={"size": 100, "query": {"query_string": {"query": query}}})
 
         hits = res.get('hits', {})
         results = hits.get('hits', [])

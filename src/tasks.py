@@ -19,7 +19,7 @@ from flask_socketio import SocketIO
 
 from arpa_linker.arpa import post
 
-from search import RFSearchGoogleAPI
+from search import RFSearchGoogleAPI, RFSearchElastic
 
 
 log = logging.getLogger(__name__)
@@ -53,6 +53,8 @@ searcher = RFSearchGoogleAPI(apikey, scrape_cache=scrape_cache, stopwords=stopwo
                              prerender_host=prerender_host, prerender_port=prerender_port,
                              arpa_url=arpa_url)
 
+searcher_elastic = RFSearchElastic(stopwords=stopwords)
+
 
 def search_cache_get(key, default=None):
     if key is None:
@@ -73,7 +75,7 @@ def get_query_hash(words):
     return sha1(' '.join(words).encode("utf-8")).hexdigest()
 
 
-def fetch_results(words, sessionid):
+def fetch_results(words, sessionid, searcher):
     """
     Fetch results from cache or search class implementation.
     """
@@ -99,7 +101,7 @@ def fetch_results(words, sessionid):
 
 
 @celery_app.task
-def scrape_page(url, sessionid):
+def scrape_page(url, sessionid, searcher):
     log.info('Scrape: {}'.format(url))
     socketio.emit('search_status_msg', {'data': 'Scraping'}, room=sessionid)
 
@@ -130,10 +132,11 @@ def scrape_page(url, sessionid):
 
 
 @celery_app.task
-def get_topics(items, query_hash, sessionid):
+def get_topics(items, query_hash, sessionid, elastic=True):
     """
     Do topic modeling on search results, or retrieve from cache if found.
     """
+    searcher_impl = searcher_elastic if elastic else searcher
     cache_hit = search_cache_get(query_hash, {})
     topic_words = cache_hit.get('topic_words')
     results = cache_hit
@@ -143,7 +146,7 @@ def get_topics(items, query_hash, sessionid):
     if not topic_words:
         log.debug('Topic modeling for query hash %s' % query_hash)
         socketio.emit('search_status_msg', {'data': 'Topic modeling'}, room=sessionid)
-        items, topic_words = searcher.topic_model(items)
+        items, topic_words = searcher_impl.topic_model(items)
 
         results.update({'items': items, 'topic_words': topic_words})
         search_cache_update(query_hash, results)
@@ -155,17 +158,17 @@ def get_topics(items, query_hash, sessionid):
 
 
 @celery_app.task
-def get_results(words, sessionid):
+def get_results(words, sessionid, searcher):
     log.debug('Get results with: {}, {}'.format(words, sessionid))
 
-    results = fetch_results(words, sessionid)
+    results = fetch_results(words, sessionid, searcher)
     items = results['items']
 
     while words and not items:
         # Try to get items by removing the last words
         words = words[:-1]
 
-        results = fetch_results(words, sessionid)
+        results = fetch_results(words, sessionid, searcher)
         items = results['items']
 
     socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
@@ -174,7 +177,7 @@ def get_results(words, sessionid):
     return items, results
 
 
-def expand_words(words, banned_words):
+def expand_words(words, banned_words, searcher):
     """
     >>> from unittest.mock import MagicMock
     >>> searcher.filter_words = MagicMock(side_effect=lambda x: x)
@@ -290,9 +293,9 @@ def combine_chunks(results, items):
         return items
     if type(results[0]) != dict:
         results = [item for chunk in results for item in chunk]
-    results = {item['url']: item['content'] for item in results}
+    results = {item['url']: item['contents'] for item in results}
     for item in items:
-        item['content'] = results.get(item['url'])
+        item['contents'] = results.get(item['url'])
     return items
 
 
@@ -316,15 +319,47 @@ def search_worker(query, sessionid):
     log.debug('Got frontend results: {res}'.format(res=frontend_results))
 
     refined_words = refine_words(search_words, frontend_results)
-    refined_words = expand_words(refined_words, banned_words)
+    refined_words = expand_words(refined_words, banned_words, searcher)
 
-    items, results = get_results(refined_words, sessionid)
+    items, results = get_results(refined_words, sessionid, searcher)
 
     query_hash = get_query_hash(refined_words)
 
     chain(scrape_page.chunks([(item['url'], sessionid) for item in items], 20).group(),
             combine_chunks.s(items),
-            get_topics.s(query_hash, sessionid),
+            get_topics.s(query_hash, sessionid, elastic=False),
+            emit_data_done.si(sessionid))()
+
+
+@celery_app.task
+def baseform_document(item):
+    item['contents'] = baseform_contents(item['contents'])
+    return item
+
+
+@celery_app.task
+def search_worker_elastic(query, sessionid):
+    search_words = query['data'].get('words') or query['data']['query'].split()
+    if not search_words:
+        return
+
+    banned_words = query['data'].get('banned_words')
+
+    log.info('Got search words from API: {words}'.format(words=search_words))
+
+    frontend_results = query['data'].get('results') or {}
+    log.debug('Got frontend results: {res}'.format(res=frontend_results))
+
+    refined_words = refine_words(search_words, frontend_results)
+    refined_words = expand_words(refined_words, banned_words, searcher_elastic)
+
+    items, results = get_results(refined_words, sessionid, searcher_elastic)
+
+    query_hash = get_query_hash(refined_words)
+
+    chain(baseform_document.chunks([(item,) for item in items], 20).group(),
+            combine_chunks.s(items),
+            get_topics.s(query_hash, sessionid, elastic=True),
             emit_data_done.si(sessionid))()
 
 
