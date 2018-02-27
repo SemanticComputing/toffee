@@ -5,8 +5,8 @@ Relevance feedback search using semantic knowledge and topic modeling.
 """
 import argparse
 import logging
-
 import math
+
 import lda
 import numpy as np
 import requests
@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from google import google
 from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer
+from elasticsearch import Elasticsearch
 
 log = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ class SearchExpanderArpa:
         return expanded
 
 
-class RFSearch_GoogleAPI(RFSearch):
+class RFSearchGoogleAPI(RFSearch):
     """
     Relevance-feedback search using Google Custom Search.
     """
@@ -261,7 +262,7 @@ class RFSearch_GoogleAPI(RFSearch):
         return sanitized
 
 
-class RFSearch_GoogleUI(RFSearch):
+class RFSearchGoogleUI(RFSearch):
     """
     Relevance-feedback search using Google Custom Search.
     """
@@ -305,9 +306,62 @@ class RFSearch_GoogleUI(RFSearch):
         return sanitized
 
 
+class RFSearchElastic(RFSearch):
+    """
+    Relevance-feedback search using Elasticsearch.
+    """
+
+    def __init__(self,
+                 stopwords=None,
+                 scrape_cache=None,
+                 elastic_nodes=[{'host': 'localhost', 'port': 9200}],
+                 elastic_index='ylenews',
+                 **kwargs):
+
+        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
+        self.es = Elasticsearch(elastic_nodes)
+        self.es_index = elastic_index
+
+    def search(self, words, expand_words=False):
+        """
+        Create a search query based on a list of words and query for results.
+
+        :param words: list of words
+        :param expand_words:
+        :return:
+        """
+        query = ' '.join(words)
+        while len(query) > 2500:
+            words.pop()
+            query = ' '.join(words)
+
+        log.info(f'Query: {query}')
+
+        res = self.es.search(index=self.es_index, body={"query": {"query_string": {"query": query}}})
+
+        hits = res.get('hits', {})
+        results = hits.get('hits', [])
+
+        total_results = hits.get('total')
+        log.debug(f'Got {total_results} total results from initial search query')
+
+        sanitized = []
+        for item in results:
+            source = item.get('_source')
+            url = source.get('url', {})
+            text_content = '\n\n'.join((cont.get('text', cont.get('alt', '')) for cont in source.get('content')))
+            sanitized.append({'name': source.get('headline', {}).get('full'),
+                              'url': url.get('short', url.get('full')),
+                              'contents': text_content,
+                              'description': source.get('lead', '')})
+
+        return sanitized
+
+
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser(description=__doc__, fromfile_prefix_chars='@')
-    argparser.add_argument("--engine", help="Search engine", default='GoogleAPI', choices=["GoogleAPI", "GoogleUI"])
+    argparser.add_argument("--engine", help="Search engine", default='GoogleAPI',
+                           choices=["GoogleAPI", "GoogleUI", "Elastic"])
     argparser.add_argument("--apikey", help="Google API key")
     argparser.add_argument('words', metavar='Keywords', type=str, nargs='+', help='search keywords')
     argparser.add_argument("--loglevel", default='INFO', help="Logging level, default is INFO.",
@@ -317,8 +371,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=getattr(logging, args.loglevel),
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    engines = {'GoogleAPI': RFSearch_GoogleAPI,
-               'GoogleUI': RFSearch_GoogleUI,
+    ENGINES = {'GoogleAPI': RFSearchGoogleAPI,
+               'GoogleUI': RFSearchGoogleUI,
+               'Elastic': RFSearchElastic
                }
 
     apikey = args.apikey
@@ -327,20 +382,21 @@ if __name__ == "__main__":
 
     np.set_printoptions(precision=3, suppress=True)
 
-    with open('stopwords.txt', 'r') as f:
-        stopwords = f.read().split()
-
+    # with open('stopwords.txt', 'r') as f:
+    #     stopwords = f.read().split()
+    #
     params = {}
-    params.update({'stopwords': stopwords})
+    # params.update({'stopwords': stopwords})
     if apikey:
         params.update({'apikey': apikey})
-    searcher = engines[engine](**params)
+    searcher = ENGINES[engine](**params)
 
     docs = searcher.search(search_words)
     # docs = pickle.load(open('google_search_results.pkl', 'rb'))
     # pickle.dump(res, open('google_search_results.pkl', 'wb'))
 
-    docs = searcher.scrape_contents(docs)
+    if 'contents' not in docs[0]:
+        docs = searcher.scrape_contents(docs)
 
     docs, _ = searcher.topic_model(docs)
 

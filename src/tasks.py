@@ -19,7 +19,7 @@ from flask_socketio import SocketIO
 
 from arpa_linker.arpa import post
 
-from search import RFSearch_GoogleAPI
+from search import RFSearchGoogleAPI
 
 
 log = logging.getLogger(__name__)
@@ -49,9 +49,9 @@ with open('fin_stopwords.txt', 'r') as f:
 with open('eng_stopwords.txt', 'r') as f:
     stopwords += f.read().split()
 
-searcher = RFSearch_GoogleAPI(apikey, scrape_cache=scrape_cache, stopwords=stopwords,
-                              prerender_host=prerender_host, prerender_port=prerender_port,
-                              arpa_url=arpa_url)
+searcher = RFSearchGoogleAPI(apikey, scrape_cache=scrape_cache, stopwords=stopwords,
+                             prerender_host=prerender_host, prerender_port=prerender_port,
+                             arpa_url=arpa_url)
 
 
 def search_cache_get(key, default=None):
