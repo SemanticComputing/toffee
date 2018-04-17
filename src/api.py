@@ -39,11 +39,13 @@ def hello():
 
 @socketio.on('search')
 def search(query):
-    log.info('Search API got query: %s' % query)
+    log.info('Search API got query: {}'.format(query))
 
-    celery_app.send_task('tasks.search_worker_elastic', (query, request.sid))
+    search_worker = 'tasks.search_worker_google' if query.get('type') == 'net' else 'tasks.search_worker_elastic'
 
-    log.info('Called task')
+    log.info('Using worker {}'.format(search_worker))
+
+    celery_app.send_task(search_worker, (query, request.sid))
 
 
 if __name__ == "__main__":

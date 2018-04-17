@@ -1,0 +1,6 @@
+grant {
+        permission java.io.FilePermission "/usr/local/lib/libvoikko.so.1.14.5", "read";
+        permission java.io.FilePermission "/usr/local/lib/libvoikko.so.1", "read";
+        permission java.io.FilePermission "/usr/local/lib/libvoikko.so", "read";
+        permission java.lang.reflect.ReflectPermission "newProxyInPackage.org.puimula.libvoikko";
+      };

@@ -28,8 +28,14 @@ class RFSearch:
     Relevance-feedback search abstract class.
     """
 
-    def __init__(self, stopwords=None, scrape_cache=None, prerender_host='localhost',
-            prerender_port='3000', arpa_url='http://demo.seco.tkk.fi/arpa/koko-related'):
+    def __init__(self,
+            stopwords=None,
+            search_cache=None,
+            scrape_cache=None,
+            prerender_host='localhost',
+            prerender_port='3000',
+            arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
+            baseform_url='http://demo.seco.tkk.fi/las/baseform'):
         """
         :param stopwords: list of stopwords
         :param scrape_cache: redis instance to use as a cache for web pages, or None for not using cache
@@ -40,6 +46,7 @@ class RFSearch:
         else:
             self.word_expander = lambda words: [(word,) for word in words]
         self.stopwords = set(stopwords or [])  # Using set for better time complexity for "x in stopwords"
+        self.search_cache = search_cache
         self.scrape_cache = scrape_cache
         self.scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
         self.prerender_host = prerender_host
@@ -57,13 +64,22 @@ class RFSearch:
     def search(self, words):
         pass
 
-    def scrape(self, url):
+    def baseform_contents(self, text):
+        if not (text or self.baseform_url):
+            return text
+        data = {'text': text, 'locale': 'fi', 'depth': 0}
+        query_result = post(self.baseform_url, data, retries=3, wait=1)
+        return query_result
+
+    def scrape(self, url, baseform=True):
         """
         Scrape a web page using prerender.
 
         :param url: URL
         :return: text contents
         """
+
+        self.scrape_cache.setex(url, page_content)
 
         page = requests.get('http://{host}:{port}/{url}'.format(
             host=self.prerender_host,
@@ -74,7 +90,14 @@ class RFSearch:
 
         page_content = soup.get_text()
         if page_content:
+            page_content = re.sub(r'\b\d+\b', '', page_content)
+            page_content = re.sub(r'\s+', ' ', page_content)
             log.info('Scraped {len} characters from URL: {url}'.format(len=len(page_content), url=url))
+            if baseform:
+                log.info('Baseforming content from URL: {url}'.format(len=len(page_content), url=url))
+                page_content = self.baseform_contents(page_content)
+                log.info('Baseformed content length: {len} characters from URL: {url}'.format(len=len(page_content), url=url))
+            self.scrape_cache.setex(url, page_content)
         else:
             log.warning('Unable to scrape any content for URL: %s' % url)
 
@@ -86,14 +109,11 @@ class RFSearch:
         for doc in documents:
             text_content = None
             if self.scrape_cache:
-                try:
-                    cached_content = self.scrape_cache.get(doc['url'])
-                    if cached_content:
-                        text_content = str(cached_content)
-                        log.info(
-                            'Found page content (%s chars) from scrape cache: %s' % (len(text_content), doc['url']))
-                except TypeError:
-                    pass
+                cached_content = self.scrape_cache.get(doc['url'])
+                if cached_content:
+                    text_content = cached_content.decode('utf-8')
+                    log.info(
+                        'Found page content (%s chars) from scrape cache: %s' % (len(text_content), doc['url']))
 
             if not text_content:
                 log.debug('Scraping document %s:  %s' % (doc['name'], doc['url']))
@@ -197,7 +217,6 @@ class RFSearchGoogleAPI(RFSearch):
 
     def __init__(self,
                  apikey='',
-                 scrape_cache=None,
                  **kwargs):
 
         super().__init__(scrape_cache=scrape_cache, **kwargs)
@@ -268,8 +287,8 @@ class RFSearchGoogleUI(RFSearch):
     Relevance-feedback search using Google Custom Search.
     """
 
-    def __init__(self, stopwords=None, scrape_cache=None, **kwargs):
-        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.num_results = 10
 
     @staticmethod
@@ -308,21 +327,23 @@ class RFSearchElastic(RFSearch):
     """
 
     def __init__(self,
-                 stopwords=None,
-                 scrape_cache=None,
                  elastic_nodes=[{'host': 'elastic', 'port': 9200}],
                  elastic_index='ylenews',
                  **kwargs):
 
-        super().__init__(stopwords=stopwords, scrape_cache=scrape_cache, **kwargs)
+        super().__init__(**kwargs)
         self.es = Elasticsearch(elastic_nodes)
         self.es_index = elastic_index
+
+    def baseform_document(self, item):
+        item['contents'] = self.baseform_contents(item.get('contents'))
+        return item
 
     @staticmethod
     def format_query(words):
         return '({})'.format(') ('.join(words))
 
-    def search(self, words, expand_words=False):
+    def search(self, words, expand_words=False, baseform=True):
         """
         Create a search query based on a list of words and query for results.
 
@@ -332,7 +353,12 @@ class RFSearchElastic(RFSearch):
         """
         query = self.format_query(words)
 
-        log.info(f'Query: {query}')
+        log.info('Query: {query}'.format(query=query))
+
+        if self.search_cache:
+            cache_hit = self.search_cache.get_json(words)
+            if cache_hit:
+                return cache_hit
 
         # Make search
         res = self.es.search(index=self.es_index, body={"size": 100, "query": {"query_string": {"query": query}}})
@@ -341,17 +367,23 @@ class RFSearchElastic(RFSearch):
         results = hits.get('hits', [])
 
         total_results = hits.get('total')
-        log.debug(f'Got {total_results} total results from initial search query')
+        log.debug('Got {total_results} total results from initial search query'.format(total_results=total_results))
 
         sanitized = []
         for item in results:
             source = item.get('_source')
             url = source.get('url', {})
             text_content = '\n\n'.join((cont.get('text', cont.get('alt', '')) for cont in source.get('content')))
-            sanitized.append({'name': source.get('headline', {}).get('full'),
+            document = {'name': source.get('headline', {}).get('full'),
                               'url': url.get('short', url.get('full')),
                               'contents': text_content,
-                              'description': source.get('lead', '')})
+                              'description': source.get('lead', '')}
+            if baseform:
+                document = self.baseform_document(document)
+            sanitized.append(document)
+
+        if sanitized and self.search_cache:
+            self.search_cache.set_json(query, sanitized)
 
         return sanitized
 

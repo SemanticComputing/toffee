@@ -24,23 +24,12 @@ from search import RFSearchGoogleAPI, RFSearchElastic
 
 log = logging.getLogger(__name__)
 
-apikey = os.environ['API_KEY']
+APIKEY = os.environ['API_KEY']
 
-prerender_host = os.environ.get('PRERENDER_HOST')
-prerender_port = os.environ.get('PRERENDER_PORT')
-
-arpa_url = os.environ.get('ARPA_URL')
-
-redis_host = os.environ.get('REDIS_HOST', 'localhost')
-
-search_cache = redis.StrictRedis(host=redis_host, port=6379, db=0)
-scrape_cache = redis.StrictRedis(host=redis_host, port=6379, db=1)
-
-scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
-
-celery_app = Celery('tasks', broker='redis://{host}'.format(host=redis_host),
-        backend='redis://{host}'.format(host=redis_host))
-socketio = SocketIO(message_queue='redis://{host}'.format(host=redis_host))
+PRERENDER_HOST = os.environ.get('PRERENDER_HOST')
+PRERENDER_PORT = os.environ.get('PRERENDER_PORT')
+REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+ARPA_URL = os.environ.get('ARPA_URL')
 
 stopwords = None
 with open('fin_stopwords.txt', 'r') as f:
@@ -49,86 +38,66 @@ with open('fin_stopwords.txt', 'r') as f:
 with open('eng_stopwords.txt', 'r') as f:
     stopwords += f.read().split()
 
-searcher = RFSearchGoogleAPI(apikey, scrape_cache=scrape_cache, stopwords=stopwords,
-                             prerender_host=prerender_host, prerender_port=prerender_port,
-                             arpa_url=arpa_url)
 
-searcher_elastic = RFSearchElastic(stopwords=stopwords)
+class Cache:
+    def __init__(self, redis_host, db):
+        self.cache = redis.StrictRedis(host=redis_host, port=6379, db=db)
+
+    def get_value(self, key, default=None):
+        if key is None:
+            return default
+        try:
+            return self.search_cache.get(key)
+        except TypeError:
+            return default
+
+    def set_value(self, key, value, expire=60 * 60 * 24):
+        if key is None:
+            raise ValueError('Tried to update cache with None as key')
+        return self.cache.setex(key, expire, value)
+
+    def set_json(self, key, value):
+        return self.set_value(key, json.dumps(value))
+
+    def get_json(self, key, default=None):
+        return json.loads(self.get_value(key))
 
 
-def search_cache_get(key, default=None):
-    if key is None:
-        return default
-    try:
-        return json.loads(search_cache.get(key))
-    except TypeError:
-        return default
+search_cache_google = Cache(REDIS_HOST, db=0)
+scrape_cache_google = Cache(REDIS_HOST, db=1)
+search_cache_elastic = Cache(REDIS_HOST, db=2)
 
+searcher_google = RFSearchGoogleAPI(APIKEY,
+        stopwords=stopwords,
+        prerender_host=PRERENDER_HOST, prerender_port=PRERENDER_PORT,
+        search_cache=search_cache_google,
+        scrape_cache=scrape_cache_google,
+        arpa_url=ARPA_URL)
 
-def search_cache_update(key, value, expire=60 * 60 * 24):
-    if key is None:
-        raise ValueError('Tried to update cache with None as key')
-    return search_cache.setex(key, expire, json.dumps(value))
+searcher_elastic = RFSearchElastic(stopwords=stopwords, search_cache=search_cache_elastic)
+
+celery_app = Celery('tasks', broker='redis://{host}'.format(host=REDIS_HOST),
+        backend='redis://{host}'.format(host=REDIS_HOST))
+socketio = SocketIO(message_queue='redis://{host}'.format(host=REDIS_HOST))
 
 
 def get_query_hash(words):
     return sha1(' '.join(words).encode("utf-8")).hexdigest()
 
 
-def fetch_results(words, sessionid, searcher):
-    """
-    Fetch results from cache or search class implementation.
-    """
-    socketio.emit('search_words', {'data': words}, room=sessionid)
-
-    log.info('Fetch results words: {}'.format(words))
-
-    query_hash = get_query_hash(words)
-    cache_hit = search_cache_get(query_hash, {})
-    items = cache_hit.get('items')
-
-    if items:
-        log.info('Cache hit for search id %s' % query_hash)
-        return cache_hit
-
-    items = searcher.search(words, expand_words=False)
-
-    log.debug('Got %s results through search' % len(items))
-
-    results = {'query_hash': query_hash, 'items': items, 'words': words}
-    search_cache_update(query_hash, results)
-    return results
-
-
 @celery_app.task
-def scrape_page(url, sessionid, searcher):
+def scrape_page(url, sessionid):
+    """
+    Scrape a URL. Only needed with Google.
+    """
+
     log.info('Scrape: {}'.format(url))
     socketio.emit('search_status_msg', {'data': 'Scraping'}, room=sessionid)
 
-    text_content = None
-    if scrape_cache:
-        try:
-            cached_content = scrape_cache.get(url)
-            if cached_content:
-                text_content = cached_content.decode('utf-8')
-                log.info('Found page content (%s chars) from scrape cache: %s' % (len(text_content), url))
-        except TypeError:
-            pass
+    text_content = searcher_google.scrape(url)
+    log.info('Scraped content length: {}'.format(len(text_content)))
 
-    if not text_content:
-        log.debug('Scraping document %s' % url)
-
-        text_content = searcher.scrape(url)
-        log.info('Scraped content length: {}'.format(len(text_content)))
-        if scrape_cache and text_content:
-            text_content = re.sub(r'\b\d+\b', '', text_content)
-            text_content = re.sub(r'\s+', ' ', text_content)
-            text_content = baseform_contents(text_content)
-            log.info('Baseformed content length: {}'.format(len(text_content)))
-            log.info('Adding page to scrape cache: %s' % (url))
-            scrape_cache.setex(url, scrape_cache_expire, text_content)
-
-    return {'url': url, 'content': text_content}
+    return {'url': url, 'contents': text_content}
 
 
 @celery_app.task
@@ -136,10 +105,11 @@ def get_topics(items, query_hash, sessionid, elastic=True):
     """
     Do topic modeling on search results, or retrieve from cache if found.
     """
-    searcher_impl = searcher_elastic if elastic else searcher
-    cache_hit = search_cache_get(query_hash, {})
-    topic_words = cache_hit.get('topic_words')
-    results = cache_hit
+
+    searcher_impl = searcher_elastic if elastic else searcher_google
+
+    results = search_cache_get(query_hash, {})
+    topic_words = results.get('topic_words')
 
     log.info('Topic words: {}'.format(topic_words))
 
@@ -157,18 +127,35 @@ def get_topics(items, query_hash, sessionid, elastic=True):
     return results, topic_words
 
 
-@celery_app.task
-def get_results(words, sessionid, searcher):
+def fetch_results(words, sessionid, query_hash, searcher):
+    """
+    Fetch results from cache or search class implementation.
+    """
+
+    socketio.emit('search_words', {'data': words}, room=sessionid)
+
+    log.info('Fetch results words: {}'.format(words))
+
+    items = searcher.search(words, expand_words=False)
+
+    log.debug('Got %s results through search' % len(items))
+
+    results = {'query_hash': query_hash, 'items': items, 'words': words}
+
+    return results
+
+
+def get_results(words, sessionid, query_hash, searcher):
     log.debug('Get results with: {}, {}'.format(words, sessionid))
 
-    results = fetch_results(words, sessionid, searcher)
+    results = fetch_results(words, sessionid, query_hash, searcher)
     items = results['items']
 
     while words and not items:
         # Try to get items by removing the last words
         words = words[:-1]
 
-        results = fetch_results(words, sessionid, searcher)
+        results = fetch_results(words, sessionid, query_hash, searcher)
         items = results['items']
 
     socketio.emit('search_status_msg', {'data': 'Got {} results'.format(len(items))}, room=sessionid)
@@ -226,7 +213,6 @@ def expand_words(words, banned_words, searcher):
     return words
 
 
-@celery_app.task
 def refine_words(words, frontend_results):
     """
     Refine the search query based on user feedback (thumbs up and down)
@@ -299,14 +285,8 @@ def combine_chunks(results, items):
     return items
 
 
-def baseform_contents(text):
-    data = {'text': text, 'locale': 'fi', 'depth': 0}
-    query_result = post('http://las:9000/las/baseform', data, retries=3, wait=1)
-    return query_result
-
-
 @celery_app.task
-def search_worker(query, sessionid):
+def search_worker_google(query, sessionid):
     search_words = query['data'].get('words') or query['data']['query'].split()
     if not search_words:
         return
@@ -319,22 +299,16 @@ def search_worker(query, sessionid):
     log.debug('Got frontend results: {res}'.format(res=frontend_results))
 
     refined_words = refine_words(search_words, frontend_results)
-    refined_words = expand_words(refined_words, banned_words, searcher)
+    refined_words = expand_words(refined_words, banned_words, searcher_google)
 
-    items, results = get_results(refined_words, sessionid, searcher)
+    query_hash = get_query_hash('google_{}'.format(refined_words))
 
-    query_hash = get_query_hash(refined_words)
+    items, results = get_results(refined_words, sessionid, query_hash, searcher_google)
 
     chain(scrape_page.chunks([(item['url'], sessionid) for item in items], 20).group(),
             combine_chunks.s(items),
             get_topics.s(query_hash, sessionid, elastic=False),
             emit_data_done.si(sessionid))()
-
-
-@celery_app.task
-def baseform_document(item):
-    item['contents'] = baseform_contents(item['contents'])
-    return item
 
 
 @celery_app.task
@@ -353,9 +327,9 @@ def search_worker_elastic(query, sessionid):
     refined_words = refine_words(search_words, frontend_results)
     refined_words = expand_words(refined_words, banned_words, searcher_elastic)
 
-    items, results = get_results(refined_words, sessionid, searcher_elastic)
+    query_hash = get_query_hash('elastic_{}'.format(refined_words))
 
-    query_hash = get_query_hash(refined_words)
+    items, results = get_results(refined_words, sessionid, query_hash, searcher_elastic)
 
     chain(baseform_document.chunks([(item,) for item in items], 20).group(),
             combine_chunks.s(items),
