@@ -6,10 +6,12 @@ Relevance feedback search using semantic knowledge and topic modeling.
 import argparse
 import logging
 import math
+import re
 
 import lda
 import numpy as np
 import requests
+from hashlib import sha1
 from arpa_linker.arpa import post
 from bs4 import BeautifulSoup
 from google import google
@@ -18,7 +20,6 @@ from sklearn.feature_extraction.text import CountVectorizer
 from elasticsearch import Elasticsearch
 
 log = logging.getLogger(__name__)
-
 
 # TODO: Query results from 2016+.
 
@@ -32,6 +33,7 @@ class RFSearch:
             stopwords=None,
             search_cache=None,
             scrape_cache=None,
+            topic_cache=None,
             prerender_host='localhost',
             prerender_port='3000',
             arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
@@ -45,9 +47,11 @@ class RFSearch:
             self.word_expander = SearchExpanderArpa(arpa_url=arpa_url).expand_words
         else:
             self.word_expander = lambda words: [(word,) for word in words]
+        self.baseform_url = baseform_url
         self.stopwords = set(stopwords or [])  # Using set for better time complexity for "x in stopwords"
         self.search_cache = search_cache
         self.scrape_cache = scrape_cache
+        self.topic_cache = topic_cache
         self.scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
         self.prerender_host = prerender_host
         self.prerender_port = prerender_port
@@ -65,7 +69,7 @@ class RFSearch:
         pass
 
     def baseform_contents(self, text):
-        if not (text or self.baseform_url):
+        if not (text and self.baseform_url):
             return text
         data = {'text': text, 'locale': 'fi', 'depth': 0}
         query_result = post(self.baseform_url, data, retries=3, wait=1)
@@ -76,10 +80,15 @@ class RFSearch:
         Scrape a web page using prerender.
 
         :param url: URL
-        :return: text contents
+        :return: text contents, baseformed if baseform is truthy
         """
 
-        self.scrape_cache.setex(url, page_content)
+        if self.scrape_cache:
+            page_content = self.scrape_cache.get_value(url)
+            if page_content:
+                log.info(
+                    'Found page content (%s chars) from scrape cache: %s' % (len(page_content), doc['url']))
+                return page_content.decode('utf-8')
 
         page = requests.get('http://{host}:{port}/{url}'.format(
             host=self.prerender_host,
@@ -97,7 +106,7 @@ class RFSearch:
                 log.info('Baseforming content from URL: {url}'.format(len=len(page_content), url=url))
                 page_content = self.baseform_contents(page_content)
                 log.info('Baseformed content length: {len} characters from URL: {url}'.format(len=len(page_content), url=url))
-            self.scrape_cache.setex(url, page_content)
+            self.scrape_cache.set_value(url, page_content)
         else:
             log.warning('Unable to scrape any content for URL: %s' % url)
 
@@ -108,21 +117,7 @@ class RFSearch:
 
         for doc in documents:
             text_content = None
-            if self.scrape_cache:
-                cached_content = self.scrape_cache.get(doc['url'])
-                if cached_content:
-                    text_content = cached_content.decode('utf-8')
-                    log.info(
-                        'Found page content (%s chars) from scrape cache: %s' % (len(text_content), doc['url']))
-
-            if not text_content:
-                log.debug('Scraping document %s:  %s' % (doc['name'], doc['url']))
-
-                text_content = self.scrape(doc['url'])
-                if self.scrape_cache and text_content:
-                    log.info('Adding page to scrape cache: %s' % (doc['url']))
-                    self.scrape_cache.setex(doc['url'], self.scrape_cache_expire, text_content)
-
+            text_content = self.scrape(doc['url'])
             if text_content:
                 doc['contents'] = text_content
 
@@ -133,6 +128,12 @@ class RFSearch:
 
         vectorizer = CountVectorizer(stop_words=list(self.stopwords))
         data_corpus = [r.get('contents', '') for r in documents]
+
+        cache_key = sha1('|||'.join([d['url'] for d in documents]).encode()).hexdigest()
+        if self.topic_cache:
+            cache_hit = self.topic_cache.get_json(cache_key)
+            if cache_hit:
+                return cache_hit
 
         if len(documents) < 3 or not any(data_corpus):
             log.error('Not enough documents for topic modeling, or corpus empty.')
@@ -164,10 +165,11 @@ class RFSearch:
         for (doc, topic) in zip(documents, doc_topics):
             doc['topic'] = topic.tolist()
 
-        import pprint
-        log.info(pprint.pformat(documents[:5]))
+        result = [documents, topics_words]
 
-        return documents, topics_words
+        self.topic_cache.set_json(cache_key, result)
+
+        return result
 
 
 class SearchExpanderArpa:
@@ -219,7 +221,7 @@ class RFSearchGoogleAPI(RFSearch):
                  apikey='',
                  **kwargs):
 
-        super().__init__(scrape_cache=scrape_cache, **kwargs)
+        super().__init__(**kwargs)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
 
     def search(self, words, expand_words=True):
@@ -239,6 +241,11 @@ class RFSearchGoogleAPI(RFSearch):
             query = ' '.join(words)
 
         log.info('Query: %s' % query)
+
+        if self.search_cache:
+            cache_hit = self.search_cache.get_json(query)
+            if cache_hit:
+                return cache_hit
 
         res = self.search_service.cse().list(
             q=query,
@@ -275,7 +282,10 @@ class RFSearchGoogleAPI(RFSearch):
 
         sanitized = []
         for item in items:
-            sanitized.append({'name': item['title'], 'url': item['link'], 'description': item['snippet']})
+            document = {'name': item['title'], 'url': item['link'], 'description': item['snippet']}
+            if self.search_cache:
+                self.search_cache.set_json(query, document)
+            sanitized.append(document)
 
         log.info('Returning %s results from search.' % len(sanitized))
 
