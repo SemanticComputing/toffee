@@ -6,11 +6,14 @@ RUN apt-get update \
 
 COPY src/requirements.txt /app/
 WORKDIR /app/
+RUN wget https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh && chmod +x wait-for-it.sh
 
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY src/ /app/
 
+RUN mkdir output && chown 1001 -R output
+
 USER 1001
 
-CMD celery -A tasks.celery_app worker -P eventlet -c 100 -l info
+CMD ./wait-for-it.sh $ELASTIC_HOST -- ./wait-for-it.sh $BASEFORM_HOST -- python trainer.py

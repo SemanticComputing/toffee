@@ -11,7 +11,6 @@ import re
 import lda
 import numpy as np
 import requests
-from hashlib import sha1
 from arpa_linker.arpa import post
 from bs4 import BeautifulSoup
 from google import google
@@ -33,7 +32,7 @@ class RFSearch:
             stopwords=None,
             search_cache=None,
             scrape_cache=None,
-            topic_cache=None,
+            topic_model=None,
             prerender_host='localhost',
             prerender_port='3000',
             arpa_url='http://demo.seco.tkk.fi/arpa/koko-related',
@@ -51,7 +50,7 @@ class RFSearch:
         self.stopwords = set(stopwords or [])  # Using set for better time complexity for "x in stopwords"
         self.search_cache = search_cache
         self.scrape_cache = scrape_cache
-        self.topic_cache = topic_cache
+        self.topic_model = topic_model
         self.scrape_cache_expire = 60 * 60 * 24  # Expiry time in seconds
         self.prerender_host = prerender_host
         self.prerender_port = prerender_port
@@ -123,53 +122,85 @@ class RFSearch:
 
         return documents
 
-    def topic_model(self, documents):
-        log.info('Topic modeling')
 
-        vectorizer = CountVectorizer(stop_words=list(self.stopwords))
-        data_corpus = [r.get('contents', '') for r in documents]
+class TopicModeler:
+    def __init__(self, stop_words=None, model=None, topic_words=None):
+        self.stop_words = stop_words or []
+        self.vectorizer = CountVectorizer(stop_words=list(self.stop_words))
 
-        cache_key = sha1('|||'.join([d['url'] for d in documents]).encode()).hexdigest()
-        if self.topic_cache:
-            cache_hit = self.topic_cache.get_json(cache_key)
-            if cache_hit:
-                return cache_hit
+        self.model = model
+        self.topic_words = topic_words
 
-        if len(documents) < 3 or not any(data_corpus):
-            log.error('Not enough documents for topic modeling, or corpus empty.')
-            return documents, [[]]
+    @property
+    def doc_topic(self):
+        return self.model.doc_topic_ if self.model else None
 
-        X = vectorizer.fit_transform(data_corpus)
-        vocab = vectorizer.get_feature_names()
+    def train(self, sample, n_topics=None):
+        """
+        >>> tm = TopicModeler()
+        >>> tm.train(['something something dark side', 'jotain jotain pimeä puoli', 'something joke',
+        ... 'tuota tätä muuta', 'something dark', 'tarve tuote myynti', 'Tampere Helsinki matkailu',
+        ... 'uutinen turve tuotanto talous'])  # doctest: +ELLIPSIS
+        [(('...', 0...), ('...', 0...), ('...'...
 
-        # TODO: This could be approximated using path length of terms in KOKO
-        n_topics = 1 + min(round(2 * math.sqrt(len(documents))), 9)
+        >>> tm.topic_words # doctest: +ELLIPSIS
+        [(('...', 0...), ('...', 0...), ('...'...
 
-        model = lda.LDA(n_topics=n_topics, n_iter=800, random_state=1)
-        model.fit(X)
-        topic_word = model.topic_word_
+        >>> tm.doc_topic # doctest: +ELLIPSIS
+        array([[0..., 0..., 0..., ...]])
+        >>> len(tm.model.doc_topic_)
+        8
+
+        >>> tm.model.n_topics
+        7
+        """
+
+        X = self.vectorizer.fit_transform(sample)
+        vocab = self.vectorizer.get_feature_names()
+
+        n_topics = n_topics or 1 + min(round(2 * math.sqrt(len(sample))), 9)
+
+        self.model = lda.LDA(n_topics=n_topics, n_iter=800, random_state=1)
+        self.model.fit(X)
+
         n_top_words = 10
-        topics_words = []
-
         eps = 0.001
-        for i, topic_dist in enumerate(topic_word):
+        self.topic_words = []
+
+        for i, topic_dist in enumerate(self.model.topic_word_):
             wordindex = np.argsort(topic_dist)[::-1]  # rev sort
             weights = topic_dist[wordindex]  # Topic word weights
             words = [np.array(vocab)[wordindex[j]] for j in range(min(n_top_words, len(wordindex))) if weights[j] > eps]
             word_weights = [weights[j] for j in range(min(n_top_words, len(wordindex))) if weights[j] > eps]
-            log.info('Topic {}: {}; {}'.format(i, ', '.join(words), ', '.join(map(str, word_weights))))
-            topics_words.append(tuple(zip(words, word_weights)))
+            log.debug('Topic {}: {}; {}'.format(i, ', '.join(words), ', '.join(map(str, word_weights))))
+            self.topic_words.append(tuple(zip(words, word_weights)))
 
-        doc_topics = model.doc_topic_
+        return self.topic_words
 
-        for (doc, topic) in zip(documents, doc_topics):
+    def get_topics(self, documents):
+        """
+        >>> import pprint
+        >>> tm = TopicModeler()
+        >>> tm.train(['something something dark side', 'jotain jotain pimeä puoli', 'something joke',
+        ... 'tuota tätä muuta', 'something dark', 'tarve tuote myynti', 'Tampere Helsinki matkailu',
+        ... 'uutinen turve tuotanto talous']) # doctest: +ELLIPSIS
+        [((...
+        >>> corpus = [{'url': 'http...', 'contents': 'nah bro'},
+        ... {'url': 'http1', 'contents': 'jotain uutinen Helsinki'},
+        ... {'url': 'http2', 'contents': 'something tuotanto'},
+        ... {'url': 'http0', 'contents': 'Helsinki tuotanto'},
+        ... {'url': 'http-1', 'contents': 'kameli järvi tuote'},
+        ... {'url': 'http-2', 'contents': 'hevonen talikko navetta'},
+        ... {'url': 'http3', 'contents': 'muu talous tarvike työkalu maailma'}]
+        >>> pprint.pprint(tm.get_topics(corpus)) # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+        ([{'contents': 'nah bro', 'topic': [0..., 0..., ...], 'url': 'http1'}, ...], [((...))])
+        """
+
+        X = self.vectorizer.fit_transform([r.get('contents', '') for r in documents])
+        for (doc, topic) in zip(documents, self.model.transform(X)):
             doc['topic'] = topic.tolist()
 
-        result = [documents, topics_words]
-
-        self.topic_cache.set_json(cache_key, result)
-
-        return result
+        return (documents, self.topic_words)
 
 
 class SearchExpanderArpa:
@@ -384,14 +415,17 @@ class RFSearchElastic(RFSearch):
             source = item.get('_source')
             url = source.get('url', {})
             text_content = '\n\n'.join((cont.get('text', cont.get('alt', '')) for cont in source.get('content')))
-            document = {'name': source.get('headline', {}).get('full'),
-                              'url': url.get('short', url.get('full')),
-                              'contents': text_content,
-                              'description': source.get('lead', '')}
+            document = {
+                'name': source.get('headline', {}).get('full'),
+                'url': url.get('short', url.get('full')),
+                'contents': text_content,
+                'description': source.get('lead', '')
+            }
             if baseform:
                 document = self.baseform_document(document)
             sanitized.append(document)
 
+        sanitized = self.topic_model.get_topics(sanitized)
         if sanitized and self.search_cache:
             self.search_cache.set_json(query, sanitized)
 

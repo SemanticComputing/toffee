@@ -7,33 +7,26 @@ import eventlet; eventlet.monkey_patch()  # noqa
 
 import logging
 import os
-from operator import itemgetter
 
+import joblib
 import redis
+from operator import itemgetter
 from celery import Celery, chain
 from collections import defaultdict
 from flask import json
 from flask_socketio import SocketIO
 
 from search import RFSearchGoogleAPI, RFSearchElastic
-
+from stop_words import STOP_WORDS
 
 log = logging.getLogger(__name__)
 
 APIKEY = os.environ['API_KEY']
-
 PRERENDER_HOST = os.environ.get('PRERENDER_HOST')
 PRERENDER_PORT = os.environ.get('PRERENDER_PORT')
 REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
 ARPA_URL = os.environ.get('ARPA_URL')
 BASEFORM_URL = os.environ.get('BASEFORM_URL')
-
-stopwords = None
-with open('fin_stopwords.txt', 'r') as f:
-    stopwords = f.read().split()
-
-with open('eng_stopwords.txt', 'r') as f:
-    stopwords += f.read().split()
 
 
 class Cache:
@@ -63,21 +56,22 @@ class Cache:
 search_cache_google = Cache(REDIS_HOST, db=0)
 scrape_cache_google = Cache(REDIS_HOST, db=1)
 search_cache_elastic = Cache(REDIS_HOST, db=2)
-topic_cache = Cache(REDIS_HOST, db=3)
+
+topic_model = joblib.load('topics/topic_model.pkl')
 
 searcher_google = RFSearchGoogleAPI(APIKEY,
-        stopwords=stopwords,
+        stopwords=STOP_WORDS,
+        topic_model=topic_model,
         prerender_host=PRERENDER_HOST, prerender_port=PRERENDER_PORT,
         search_cache=search_cache_google,
         scrape_cache=scrape_cache_google,
-        topic_cache=topic_cache,
         arpa_url=ARPA_URL,
         baseform_url=BASEFORM_URL)
 
-searcher_elastic = RFSearchElastic(stopwords=stopwords,
+searcher_elastic = RFSearchElastic(stopwords=STOP_WORDS,
         search_cache=search_cache_elastic,
-        topic_cache=topic_cache,
         arpa_url=ARPA_URL,
+        topic_model=topic_model,
         baseform_url=BASEFORM_URL)
 
 celery_app = Celery('tasks', broker='redis://{host}'.format(host=REDIS_HOST),
@@ -100,26 +94,6 @@ def scrape_page(url, sessionid):
     return {'url': url, 'contents': text_content}
 
 
-@celery_app.task
-def get_topics(items, results, sessionid, elastic=True):
-    """
-    Do topic modeling on search results, or retrieve from cache if found.
-    """
-
-    socketio.emit('search_status_msg', {'data': 'Topic modeling'}, room=sessionid)
-
-    searcher_impl = searcher_elastic if elastic else searcher_google
-
-    items, topic_words = searcher_impl.topic_model(items)
-    log.info('Topic words: {}'.format(topic_words))
-
-    results.update({'items': items, 'topic_words': topic_words})
-
-    socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
-
-    return results, topic_words
-
-
 def fetch_results(words, sessionid, searcher):
     """
     Fetch results from cache or search class implementation.
@@ -129,11 +103,11 @@ def fetch_results(words, sessionid, searcher):
 
     log.info('Fetch results words: {}'.format(words))
 
-    items = searcher.search(words, expand_words=False)
+    items, topic_words = searcher.search(words, expand_words=False)
 
     log.debug('Got %s results through search' % len(items))
 
-    results = {'items': items, 'words': words}
+    results = {'items': items, 'words': words, 'topic_words': topic_words}
 
     return results
 
@@ -206,27 +180,23 @@ def expand_words(words, banned_words, searcher):
     return words
 
 
-def refine_words(words, frontend_query, search_cache):
+def refine_words(words, frontend_query, searcher):
     """
     Refine the search query based on user feedback (thumbs up and down)
     """
 
     log.info('Refine words got initial words: {}'.format(words))
 
-    if not frontend_query:
+    frontend_results = frontend_query.get('results') if frontend_query else None
+    if not frontend_results:
         log.info('No thumbs received')
         return words
 
-    topic_words = frontend_query['data'].get('topic_words')
-    if not topic_words:
-        log.warn('No topic words found')
-        return words
-
-    documents = search_cache.get_json(' '.join(words))
+    documents, topic_words = searcher.search(words)
     new_word_weights = defaultdict(int, zip(words, [1] * len(words)))  # Initialized with old search words
 
     # Loop through each result and modify word weights based on its topics' words, if it has been thumbed
-    for result in [res for res in frontend_query.get('results') if res.get('thumb') is not None]:
+    for result in [res for res in frontend_results if res.get('thumb') is not None]:
         url = result['url']
         thumb = result['thumb']
         topics = next(document.get('topic') for document in documents if document['url'] == url)
@@ -287,14 +257,13 @@ def search_worker_google(query, sessionid):
 
     log.debug('Got frontend query: {query}'.format(query=query))
 
-    refined_words = refine_words(search_words, query['data'], search_cache_google)
+    refined_words = refine_words(search_words, query['data'], searcher_google)
     refined_words = expand_words(refined_words, banned_words, searcher_google)
 
     items, results = get_results(refined_words, sessionid, searcher_google)
 
     chain(scrape_page.chunks([(item['url'], sessionid) for item in items], 20).group(),
             combine_chunks.s(items),
-            get_topics.s(results, sessionid, elastic=False),
             emit_data_done.si(sessionid))()
 
 
@@ -310,13 +279,12 @@ def search_worker_elastic(query, sessionid):
 
     log.debug('Got frontend query: {query}'.format(query=query))
 
-    refined_words = refine_words(search_words, query['data'], search_cache_elastic)
+    refined_words = refine_words(search_words, query['data'], searcher_elastic)
     refined_words = expand_words(refined_words, banned_words, searcher_elastic)
 
     items, results = get_results(refined_words, sessionid, searcher_elastic)
 
-    chain(get_topics.si(items, results, sessionid, elastic=True),
-            emit_data_done.si(sessionid))()
+    emit_data_done(sessionid)
 
 
 if __name__ == '__main__':

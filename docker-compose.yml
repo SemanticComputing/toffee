@@ -27,6 +27,8 @@ services:
             - PRERENDER_PORT=3000
             - ARPA_URL=http://arpa:9000/koko-related
             - BASEFORM_URL=http://las:9000/las/baseform
+        volumes:
+            - topics:/app/topics
         user: nobody
     redis:
         image: redis:alpine
@@ -49,5 +51,6 @@ services:
             - hades_esdata:/usr/share/elasticsearch/data
 
 volumes:
+    topics:
     hades_esdata:
         external: true

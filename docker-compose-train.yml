@@ -1,0 +1,23 @@
+version: '3.5'
+services:
+    trainer:
+        build:
+            dockerfile: Dockerfile.trainer
+            context: .
+        environment:
+            - BASEFORM_URL=http://las:9000/las/baseform
+            - BASEFORM_HOST=las:9000
+            - ELASTIC_HOST=elastic:9200
+        volumes:
+            - topics:/app/output
+    las:
+        image: jiemakel/las-ws:1.1
+    elastic:
+        build: ./elastic
+        volumes:
+            - hades_esdata:/usr/share/elasticsearch/data
+
+volumes:
+    topics:
+    hades_esdata:
+        external: true
