@@ -141,10 +141,10 @@ class TopicModeler:
         >>> tm.train(['something something dark side', 'jotain jotain pimeä puoli', 'something joke',
         ... 'tuota tätä muuta', 'something dark', 'tarve tuote myynti', 'Tampere Helsinki matkailu',
         ... 'uutinen turve tuotanto talous'])  # doctest: +ELLIPSIS
-        [(('...', 0...), ('...', 0...), ('...'...
+        [(('...', 0...), ('...', 0...), ('...'...))]
 
         >>> tm.topic_words # doctest: +ELLIPSIS
-        [(('...', 0...), ('...', 0...), ('...'...
+        [(('...', 0...), ('...', 0...), ('...'...))]
 
         >>> tm.doc_topic # doctest: +ELLIPSIS
         array([[0..., 0..., 0..., ...]])
@@ -152,30 +152,43 @@ class TopicModeler:
         8
 
         >>> tm.model.n_topics
-        7
+        4
         """
 
         X = self.vectorizer.fit_transform(sample)
         vocab = self.vectorizer.get_feature_names()
 
-        n_topics = n_topics or 1 + min(round(2 * math.sqrt(len(sample))), 9)
+        n_topics = n_topics or 1 + round(math.sqrt(len(sample)))
 
-        self.model = lda.LDA(n_topics=n_topics, n_iter=800, random_state=1)
+        self.model = lda.LDA(n_topics=n_topics, n_iter=2000, random_state=1)
         self.model.fit(X)
 
         n_top_words = 10
         eps = 0.001
         self.topic_words = []
 
-        for i, topic_dist in enumerate(self.model.topic_word_):
+        self.topic_words = self.get_top_topic_words(self.model.topic_word_, vocab, n_top_words, eps)
+
+        return self.topic_words
+
+    @staticmethod
+    def get_top_topic_words(topic_words, vocab, n_top_words, eps):
+        """
+        >>> topic_words = np.array([[0.1, 0.2, 0.4, 0.25, 0.05], [0.2, 0.3, 0.2, 0.05, 0.35]])
+        >>> vocab = ['sana', 'toinen', 'kolmas', 'neljäs', 'viides', 'kuudes']
+        >>> TopicModeler.get_top_topic_words(topic_words, vocab, 3, 0.001)
+        [(('kolmas', 0.4), ('neljäs', 0.25), ('toinen', 0.2)), (('viides', 0.35), ('toinen', 0.3), ('kolmas', 0.2))]
+        """
+        results = []
+        for i, topic_dist in enumerate(topic_words):
             wordindex = np.argsort(topic_dist)[::-1]  # rev sort
             weights = topic_dist[wordindex]  # Topic word weights
             words = [np.array(vocab)[wordindex[j]] for j in range(min(n_top_words, len(wordindex))) if weights[j] > eps]
             word_weights = [weights[j] for j in range(min(n_top_words, len(wordindex))) if weights[j] > eps]
             log.debug('Topic {}: {}; {}'.format(i, ', '.join(words), ', '.join(map(str, word_weights))))
-            self.topic_words.append(tuple(zip(words, word_weights)))
+            results.append(tuple(zip(words, word_weights)))
 
-        return self.topic_words
+        return results
 
     def get_topics(self, documents):
         """
@@ -184,7 +197,7 @@ class TopicModeler:
         >>> tm.train(['something something dark side', 'jotain jotain pimeä puoli', 'something joke',
         ... 'tuota tätä muuta', 'something dark', 'tarve tuote myynti', 'Tampere Helsinki matkailu',
         ... 'uutinen turve tuotanto talous']) # doctest: +ELLIPSIS
-        [((...
+        [((...))]
         >>> corpus = [{'url': 'http...', 'contents': 'nah bro'},
         ... {'url': 'http1', 'contents': 'jotain uutinen Helsinki'},
         ... {'url': 'http2', 'contents': 'something tuotanto'},
@@ -199,6 +212,8 @@ class TopicModeler:
         X = self.vectorizer.fit_transform([r.get('contents', '') for r in documents])
         for (doc, topic) in zip(documents, self.model.transform(X)):
             doc['topic'] = topic.tolist()
+            log.debug(doc['name'])
+            log.debug(self.topic_words[np.argmax(topic)])
 
         return (documents, self.topic_words)
 
@@ -314,9 +329,9 @@ class RFSearchGoogleAPI(RFSearch):
         sanitized = []
         for item in items:
             document = {'name': item['title'], 'url': item['link'], 'description': item['snippet']}
-            if self.search_cache:
-                self.search_cache.set_json(query, document)
             sanitized.append(document)
+        if sanitized and self.search_cache:
+            self.search_cache.set_json(query, sanitized)
 
         log.info('Returning %s results from search.' % len(sanitized))
 
