@@ -193,26 +193,35 @@ class TopicModeler:
     def get_topics(self, documents):
         """
         >>> import pprint
+        >>> import numpy as np
         >>> tm = TopicModeler()
         >>> tm.train(['something something dark side', 'jotain jotain pimeä puoli', 'something joke',
-        ... 'tuota tätä muuta', 'something dark', 'tarve tuote myynti', 'Tampere Helsinki matkailu',
-        ... 'uutinen turve tuotanto talous']) # doctest: +ELLIPSIS
+        ... 'tuota tätä muuta puoli', 'something dark', 'tarve tuote myynti jotain muuta',
+        ... 'Tampere Helsinki matkailu uutinen', 'uutinen turve tuotanto matkailu'], n_topics=3) # doctest: +ELLIPSIS
         [((...))]
         >>> corpus = [{'url': 'http...', 'contents': 'nah bro'},
         ... {'url': 'http1', 'contents': 'jotain uutinen Helsinki'},
-        ... {'url': 'http2', 'contents': 'something tuotanto'},
+        ... {'url': 'http2', 'contents': 'something dark'},
         ... {'url': 'http0', 'contents': 'Helsinki tuotanto'},
         ... {'url': 'http-1', 'contents': 'kameli järvi tuote'},
         ... {'url': 'http-2', 'contents': 'hevonen talikko navetta'},
         ... {'url': 'http3', 'contents': 'muu talous tarvike työkalu maailma'}]
-        >>> pprint.pprint(tm.get_topics(corpus)) # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
-        ([{'contents': 'nah bro', 'topic': [0..., 0..., ...], 'url': 'http1'}, ...], [((...))])
+        >>> topics = tm.get_topics(corpus)
+        >>> pprint.pprint(topics) # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+        ([{'contents': 'nah bro', 'topic': [..., ..., ...], 'url': 'http1'}, ...], [((...))])
+        >>> pprint.pprint(topics[0][2]) # doctest: +ELLIPSIS +NORMALIZE_WHITESPACE
+        {'contents': 'something dark', 'topic': [...], 'url': 'http2'}
+        >>> topic = topics[1][np.argmax(topics[0][2]['topic'])]
+        >>> 'something' in [t[0] for t in topic]
+        True
+        >>> 'dark' in [t[0] for t in topic]
+        True
         """
 
-        X = self.vectorizer.fit_transform([r.get('contents', '') for r in documents])
+        X = self.vectorizer.transform([r.get('contents', '') for r in documents])
         for (doc, topic) in zip(documents, self.model.transform(X)):
             doc['topic'] = topic.tolist()
-            log.debug(doc['name'])
+            log.debug(doc.get('name'))
             log.debug(self.topic_words[np.argmax(topic)])
 
         return (documents, self.topic_words)
