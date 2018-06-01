@@ -1,4 +1,4 @@
-# Toffee -- Topical Feedback Search
+# Toffee -- Topical Relevance Feedback Search
 
 ## Running locally
 
