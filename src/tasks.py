@@ -203,7 +203,7 @@ def refine_words(words, frontend_query, searcher):
         log.info('Weighting {url} {thumb} {topics}'.format(url=url, thumb=thumb, topics=topics))
 
         if not topics:
-            log.warn('No topics found for {}'.format(url))
+            log.warning('No topics found for {}'.format(url))
             continue
 
         # Loop through topics and their words

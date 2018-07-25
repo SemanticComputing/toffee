@@ -5,6 +5,10 @@
 - Hades for news corpus index in elasticsearch: https://github.com/SemanticComputing/hades
     - Elasticsearch uses the Hades `esdata` volume directly if present
 
+## Architecture
+
+![Toffee system architecture](toffee_system.png)
+
 ## Running the initial training using the news corpus
 
 ```
@@ -19,3 +23,4 @@ Add a file named `.env` to the repository root with `API_KEY=` and the Google se
 docker-compose build --build-arg 'REACT_APP_BACKEND=http://localhost:5000' frontend
 docker-compose up -d
 ```
+
