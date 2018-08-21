@@ -86,7 +86,7 @@ class RFSearch:
             page_content = self.scrape_cache.get_value(url)
             if page_content:
                 log.info(
-                    'Found page content (%s chars) from scrape cache: %s' % (len(page_content), doc['url']))
+                    'Found page content (%s chars) from scrape cache: %s' % (len(page_content), url))
                 return page_content.decode('utf-8')
 
         page = requests.get('http://{host}:{port}/{url}'.format(
@@ -224,7 +224,7 @@ class TopicModeler:
             log.debug(doc.get('name'))
             log.debug(self.topic_words[np.argmax(topic)])
 
-        return (documents, self.topic_words)
+        return documents, self.topic_words
 
 
 class SearchExpanderArpa:
@@ -279,6 +279,9 @@ class RFSearchGoogleAPI(RFSearch):
         super().__init__(**kwargs)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
 
+    def words_to_query(self, words):
+        return ' '.join(words)
+
     def search(self, words, expand_words=True):
         """
         Create a search query based on a list of words and query for results.
@@ -290,7 +293,7 @@ class RFSearchGoogleAPI(RFSearch):
         if expand_words:
             words = self.combine_expanded(self.word_expander(words))
 
-        query = ' '.join(words)
+        query = self.words_to_query(words)
         while len(query) > 2500:
             words.pop()
             query = ' '.join(words)
@@ -339,10 +342,14 @@ class RFSearchGoogleAPI(RFSearch):
         for item in items:
             document = {'name': item['title'], 'url': item['link'], 'description': item['snippet']}
             sanitized.append(document)
-        if sanitized and self.search_cache:
+
+        results = len(sanitized)
+        sanitized = (sanitized, None)
+
+        if results and self.search_cache:
             self.search_cache.set_json(query, sanitized)
 
-        log.info('Returning %s results from search.' % len(sanitized))
+        log.info('Returning %s results from search.' % results)
 
         return sanitized
 
@@ -383,7 +390,7 @@ class RFSearchGoogleUI(RFSearch):
 
         log.info('Got %s results from search.' % len(sanitized))
 
-        return sanitized
+        return sanitized, None
 
 
 class RFSearchElastic(RFSearch):

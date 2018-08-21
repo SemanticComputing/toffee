@@ -3,7 +3,9 @@
 """
 Relevance feedback search Celery tasks.
 """
-import eventlet; eventlet.monkey_patch()  # noqa
+import eventlet;
+
+eventlet.monkey_patch()  # noqa
 
 import logging
 import os
@@ -60,22 +62,22 @@ search_cache_elastic = Cache(REDIS_HOST, db=2)
 topic_model = joblib.load('topics/topic_model.pkl')
 
 searcher_google = RFSearchGoogleAPI(APIKEY,
-        stopwords=STOP_WORDS,
-        topic_model=topic_model,
-        prerender_host=PRERENDER_HOST, prerender_port=PRERENDER_PORT,
-        search_cache=search_cache_google,
-        scrape_cache=scrape_cache_google,
-        arpa_url=ARPA_URL,
-        baseform_url=BASEFORM_URL)
+                                    stopwords=STOP_WORDS,
+                                    topic_model=topic_model,
+                                    prerender_host=PRERENDER_HOST, prerender_port=PRERENDER_PORT,
+                                    search_cache=search_cache_google,
+                                    scrape_cache=scrape_cache_google,
+                                    arpa_url=ARPA_URL,
+                                    baseform_url=BASEFORM_URL)
 
 searcher_elastic = RFSearchElastic(stopwords=STOP_WORDS,
-        search_cache=search_cache_elastic,
-        arpa_url=ARPA_URL,
-        topic_model=topic_model,
-        baseform_url=BASEFORM_URL)
+                                   search_cache=search_cache_elastic,
+                                   arpa_url=ARPA_URL,
+                                   topic_model=topic_model,
+                                   baseform_url=BASEFORM_URL)
 
 celery_app = Celery('tasks', broker='redis://{host}'.format(host=REDIS_HOST),
-        backend='redis://{host}'.format(host=REDIS_HOST))
+                    backend='redis://{host}'.format(host=REDIS_HOST))
 socketio = SocketIO(message_queue='redis://{host}'.format(host=REDIS_HOST))
 
 
@@ -96,7 +98,7 @@ def scrape_page(url, sessionid):
 
 def fetch_results(words, sessionid, searcher):
     """
-    Fetch results from cache or search class implementation.
+    Fetch results from cache or search class implementation, based on the search words.
     """
 
     socketio.emit('search_words', {'data': words}, room=sessionid)
@@ -113,6 +115,9 @@ def fetch_results(words, sessionid, searcher):
 
 
 def get_results(words, sessionid, searcher):
+    """
+    Get results for the given search words
+    """
     log.debug('Get results with: {}, {}'.format(words, sessionid))
 
     results = fetch_results(words, sessionid, searcher)
@@ -164,7 +169,8 @@ def expand_words(words, banned_words, searcher):
     ['innovaatio OR o0 OR o1 OR o3 OR o5 OR o6', 'teknologia OR o0 OR o1 OR o3 OR o5 OR o6']
     """
 
-    log.info('Expand words: {words}; remove banned words: {banned_words}'.format(words=words, banned_words=banned_words))
+    log.info(
+        'Expand words: {words}; remove banned words: {banned_words}'.format(words=words, banned_words=banned_words))
     words = searcher.filter_words(words)
     words = searcher.word_expander(words)
     filtered_words = []
@@ -219,10 +225,10 @@ def refine_words(words, frontend_query, searcher):
 
                 new_word_weights[word] += weight * (1 if thumb else -1)
 
-    new_search_words, _ = zip(*sorted(new_word_weights.items(), key=itemgetter(1), reverse=True))
-    log.info('New search words based on topic modeling and thumbs: %s' %
-                sorted(new_word_weights.items(), key=itemgetter(1), reverse=True)[:10])
-    words = new_search_words[:(max(5, len(words)))]
+    new_search_words, weights = zip(*sorted(new_word_weights.items(), key=itemgetter(1), reverse=True))
+    num_words = max(5, len(words))
+    log.info('Top 50 refined search words (%s used): %s' % (num_words, list(zip(new_search_words, weights))[:50]))
+    words = new_search_words[:num_words]
 
     return words
 
@@ -246,8 +252,32 @@ def combine_chunks(results, items):
 
 
 @celery_app.task
+def get_topics(items, results, sessionid, words, elastic=False):
+    """
+    Do topic modeling on search results, or retrieve from cache if found.
+    """
+    socketio.emit('search_status_msg', {'data': 'Topic modeling'}, room=sessionid)
+
+    searcher_impl = searcher_elastic if elastic else searcher_google
+
+    items, topic_words = searcher_impl.topic_model.get_topics(items)
+    log.info('Topic words: {}'.format(topic_words))
+    results.update({'items': items, 'topic_words': topic_words})
+
+    socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
+
+    if not elastic:
+        # Update search cache
+        searcher_impl.search_cache.set_json(searcher_impl.words_to_query(words), (items, topic_words))
+
+    return results, topic_words
+
+
+@celery_app.task
 def search_worker_google(query, sessionid):
     search_words = query['data'].get('words') or query['data']['query'].split()
+    if '()' in search_words:
+        search_words.remove('')
     if not search_words:
         return
 
@@ -263,13 +293,16 @@ def search_worker_google(query, sessionid):
     items, results = get_results(refined_words, sessionid, searcher_google)
 
     chain(scrape_page.chunks([(item['url'], sessionid) for item in items], 20).group(),
-            combine_chunks.s(items),
-            emit_data_done.si(sessionid))()
+          combine_chunks.s(items),
+          get_topics.s(results, sessionid, refined_words),
+          emit_data_done.si(sessionid))()
 
 
 @celery_app.task
 def search_worker_elastic(query, sessionid):
     search_words = query['data'].get('words') or query['data']['query'].split()
+    if '()' in search_words:
+        search_words.remove('')
     if not search_words:
         return
 
@@ -289,4 +322,5 @@ def search_worker_elastic(query, sessionid):
 
 if __name__ == '__main__':
     import doctest
+
     doctest.testmod()

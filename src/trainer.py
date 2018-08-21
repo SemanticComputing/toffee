@@ -45,8 +45,9 @@ if __name__ == '__main__':
 
     tm = TopicModeler(stop_words=STOP_WORDS)
 
-    log.info('Training topic model...')
-    tm.train(text_content, n_topics=round(math.sqrt(2 * len(text_content))))
+    n_topics = round(math.sqrt(10 * len(text_content)))
+    log.info('Training topic model with {n} topics...'.format(n=n_topics))
+    tm.train(text_content, n_topics=n_topics)
 
     log.info('Dumping topic model...')
     joblib.dump(tm, 'output/topic_model.pkl')
