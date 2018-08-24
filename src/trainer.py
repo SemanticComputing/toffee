@@ -45,7 +45,7 @@ if __name__ == '__main__':
 
     tm = TopicModeler(stop_words=STOP_WORDS)
 
-    n_topics = round(math.sqrt(10 * len(text_content)))
+    n_topics = round(math.sqrt(100 * len(text_content)))
     log.info('Training topic model with {n} topics...'.format(n=n_topics))
     tm.train(text_content, n_topics=n_topics)
 

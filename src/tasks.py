@@ -116,7 +116,7 @@ def fetch_results(words, sessionid, searcher):
 
 def get_results(words, sessionid, searcher):
     """
-    Get results for the given search words
+    Get results for the given search words and emit them to client
     """
     log.debug('Get results with: {}, {}'.format(words, sessionid))
 
@@ -273,8 +273,8 @@ def get_topics(items, results, sessionid, words, elastic=False):
     return results, topic_words
 
 
-@celery_app.task
-def search_worker_google(query, sessionid):
+def parse_query(query, sessionid):
+    log.debug('Got frontend query: {query}'.format(query=query))
     search_words = query['data'].get('words') or query['data']['query'].split()
     if '()' in search_words:
         search_words.remove('')
@@ -285,7 +285,13 @@ def search_worker_google(query, sessionid):
 
     log.info('Got search words from API: {words}'.format(words=search_words))
 
-    log.debug('Got frontend query: {query}'.format(query=query))
+    socketio.emit('search_status_msg', {'data': 'Searching'}, room=sessionid)
+    return search_words, banned_words
+
+
+@celery_app.task
+def search_worker_google(query, sessionid):
+    search_words, banned_words = parse_query(query, sessionid)
 
     refined_words = refine_words(search_words, query['data'], searcher_google)
     refined_words = expand_words(refined_words, banned_words, searcher_google)
@@ -300,17 +306,7 @@ def search_worker_google(query, sessionid):
 
 @celery_app.task
 def search_worker_elastic(query, sessionid):
-    search_words = query['data'].get('words') or query['data']['query'].split()
-    if '()' in search_words:
-        search_words.remove('')
-    if not search_words:
-        return
-
-    banned_words = query['data'].get('banned_words')
-
-    log.info('Got search words from API: {words}'.format(words=search_words))
-
-    log.debug('Got frontend query: {query}'.format(query=query))
+    search_words, banned_words = parse_query(query, sessionid)
 
     refined_words = refine_words(search_words, query['data'], searcher_elastic)
     refined_words = expand_words(refined_words, banned_words, searcher_elastic)
