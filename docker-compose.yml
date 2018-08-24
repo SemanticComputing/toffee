@@ -1,7 +1,7 @@
 version: '3.5'
 services:
     frontend:
-        build: https://github.com/SemanticComputing/relevance-feedback-frontend.git#search-type
+        build: https://github.com/SemanticComputing/relevance-feedback-frontend.git#master
         ports:
             - 3000:5000
     web:
