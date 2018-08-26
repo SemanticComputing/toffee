@@ -17,7 +17,10 @@ if __name__ == '__main__':
 
     log = logging.getLogger(__name__)
 
-    es = Elasticsearch([{'host': 'elastic', 'port': 9200}])
+    ELASTIC_HOST = os.environ.get('ELASTIC_HOST', 'elastic')
+    ELASTIC_PORT = os.environ.get('ELASTIC_PORT', '9200')
+
+    es = Elasticsearch([{'host': ELASTIC_HOST, 'port': ELASTIC_PORT}])
     es_index = 'ylenews'
 
     query = {

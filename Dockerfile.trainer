@@ -16,4 +16,4 @@ RUN mkdir output && chown 1001 -R output
 
 USER 1001
 
-CMD ./wait-for-it.sh $ELASTIC_HOST -- ./wait-for-it.sh $BASEFORM_HOST -- python trainer.py
+CMD ./wait-for-it.sh elastic:9200 -- ./wait-for-it.sh $BASEFORM_HOST -- python trainer.py

@@ -7,7 +7,8 @@ services:
         environment:
             - BASEFORM_URL=http://las:9000/las/baseform
             - BASEFORM_HOST=las:9000
-            - ELASTIC_HOST=elastic:9200
+            - ELASTIC_HOST=elastic
+            - ELASTIC_PORT=9200
         volumes:
             - topics:/app/output
     las:
