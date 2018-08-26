@@ -27,6 +27,8 @@ APIKEY = os.environ['API_KEY']
 PRERENDER_HOST = os.environ.get('PRERENDER_HOST')
 PRERENDER_PORT = os.environ.get('PRERENDER_PORT')
 REDIS_HOST = os.environ.get('REDIS_HOST', 'localhost')
+ELASTIC_HOST = os.environ.get('ELASTIC_HOST', 'elastic')
+ELASTIC_PORT = os.environ.get('ELASTIC_PORT', '9200')
 ARPA_URL = os.environ.get('ARPA_URL')
 BASEFORM_URL = os.environ.get('BASEFORM_URL')
 
@@ -70,7 +72,8 @@ searcher_google = RFSearchGoogleAPI(APIKEY,
                                     arpa_url=ARPA_URL,
                                     baseform_url=BASEFORM_URL)
 
-searcher_elastic = RFSearchElastic(stopwords=STOP_WORDS,
+searcher_elastic = RFSearchElastic(elastic_nodes=[{'host': ELASTIC_HOST, 'port': ELASTIC_PORT}],
+                                   stopwords=STOP_WORDS,
                                    search_cache=search_cache_elastic,
                                    arpa_url=ARPA_URL,
                                    topic_model=topic_model,
