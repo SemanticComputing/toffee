@@ -61,11 +61,13 @@ search_cache_google = Cache(REDIS_HOST, db=0)
 scrape_cache_google = Cache(REDIS_HOST, db=1)
 search_cache_elastic = Cache(REDIS_HOST, db=2)
 
-topic_model = joblib.load('topics/topic_model.pkl')
+try:
+    topic_model = joblib.load('topics/topic_model.pkl')
+except FileNotFoundError:
+    topic_model = None
 
 searcher_google = RFSearchGoogleAPI(APIKEY,
                                     stopwords=STOP_WORDS,
-                                    topic_model=topic_model,
                                     prerender_host=PRERENDER_HOST, prerender_port=PRERENDER_PORT,
                                     search_cache=search_cache_google,
                                     scrape_cache=scrape_cache_google,
@@ -121,7 +123,7 @@ def get_results(words, sessionid, searcher):
     """
     Get results for the given search words and emit them to client
     """
-    log.debug('Get results with: {}, {}'.format(words, sessionid))
+    log.info('Get results with: {}, {}'.format(words, sessionid))
 
     results = fetch_results(words, sessionid, searcher)
     items = results['items']
@@ -208,7 +210,7 @@ def refine_words(words, frontend_query, searcher):
     for result in [res for res in frontend_results if res.get('thumb') is not None]:
         url = result['url']
         thumb = result['thumb']
-        topics = next(document.get('topic') for document in documents if document['url'] == url)
+        topics = next((document.get('topic') for document in documents if document['url'] == url), None)
         log.info('Weighting {url} {thumb} {topics}'.format(url=url, thumb=thumb, topics=topics))
 
         if not topics:
@@ -219,7 +221,7 @@ def refine_words(words, frontend_query, searcher):
         for topic, topic_weight in enumerate(topics):
             for word, weight_in_topic in topic_words[topic]:
                 weight = topic_weight * float(weight_in_topic) * 50
-                log.info('Topic %s, word %s: %.10f -> %.10f' % (topic, word, weight_in_topic, weight))
+                log.debug('Topic %s, word %s: %.10f -> %.10f' % (topic, word, weight_in_topic, weight))
 
                 # Match word to existing expanded words in a non-robust way:
                 for existing in new_word_weights.keys():
@@ -255,13 +257,14 @@ def combine_chunks(results, items):
 
 
 @celery_app.task
-def get_topics(items, results, sessionid, words, elastic=False):
+def topic_model_documents(items, results, sessionid, words):
     """
-    Do topic modeling on search results, or retrieve from cache if found.
+    Do real-time topic modeling on search results, or retrieve from cache if found.
     """
     socketio.emit('search_status_msg', {'data': 'Topic modeling'}, room=sessionid)
 
-    searcher_impl = searcher_elastic if elastic else searcher_google
+    searcher_impl = searcher_google
+    searcher_impl.train_topic_model(items)
 
     items, topic_words = searcher_impl.topic_model.get_topics(items)
     log.info('Topic words: {}'.format(topic_words))
@@ -269,15 +272,18 @@ def get_topics(items, results, sessionid, words, elastic=False):
 
     socketio.emit('search_ready', {'data': json.dumps(results)}, room=sessionid)
 
-    if not elastic:
-        # Update search cache
-        searcher_impl.search_cache.set_json(searcher_impl.words_to_query(words), (items, topic_words))
+    # Update search cache
+    log.info('Updating cache with topics for words: {}'.format(words))
+    searcher_impl.search_cache.set_json(searcher_impl.format_query(words), (items, topic_words))
 
     return results, topic_words
 
 
 def parse_query(query, sessionid):
-    log.debug('Got frontend query: {query}'.format(query=query))
+    """
+    Parse search words from query object received from the UI.
+    """
+    log.info('Got frontend query: {query}'.format(query=query))
     search_words = query['data'].get('words') or query['data']['query'].split()
     if '()' in search_words:
         search_words.remove('')
@@ -294,21 +300,29 @@ def parse_query(query, sessionid):
 
 @celery_app.task
 def search_worker_google(query, sessionid):
+    """
+    Initiate search iteration using google search.
+    """
     search_words, banned_words = parse_query(query, sessionid)
 
+    log.info('search_worker_google search words: {}'.format(search_words))
     refined_words = refine_words(search_words, query['data'], searcher_google)
     refined_words = expand_words(refined_words, banned_words, searcher_google)
 
+    log.info('search_worker_google refined search words: {}'.format(refined_words))
     items, results = get_results(refined_words, sessionid, searcher_google)
 
     chain(scrape_page.chunks([(item['url'], sessionid) for item in items], 20).group(),
           combine_chunks.s(items),
-          get_topics.s(results, sessionid, refined_words),
+          topic_model_documents.s(results, sessionid, refined_words),
           emit_data_done.si(sessionid))()
 
 
 @celery_app.task
 def search_worker_elastic(query, sessionid):
+    """
+    Initiate search iteration using elasticsearch.
+    """
     search_words, banned_words = parse_query(query, sessionid)
 
     refined_words = refine_words(search_words, query['data'], searcher_elastic)

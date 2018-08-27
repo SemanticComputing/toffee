@@ -18,6 +18,8 @@ from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer
 from elasticsearch import Elasticsearch
 
+from stop_words import STOP_WORDS
+
 log = logging.getLogger(__name__)
 
 # TODO: Query results from 2016+.
@@ -137,6 +139,8 @@ class TopicModeler:
 
     def train(self, sample, n_topics=None):
         """
+        Train the topic model with a list of text content
+
         >>> tm = TopicModeler()
         >>> tm.train(['something something dark side', 'jotain jotain pimeä puoli', 'something joke',
         ... 'tuota tätä muuta', 'something dark', 'tarve tuote myynti', 'Tampere Helsinki matkailu',
@@ -278,9 +282,19 @@ class RFSearchGoogleAPI(RFSearch):
 
         super().__init__(**kwargs)
         self.search_service = build("customsearch", "v1", developerKey=apikey)
+        if self.topic_model is None:
+            self.topic_model = TopicModeler(stop_words=STOP_WORDS)
 
-    def words_to_query(self, words):
+    def train_topic_model(self, documents):
+        data_corpus = [r.get('contents', '') for r in documents]
+        self.topic_model.train(data_corpus)
+
+    def format_query(self, words):
         return ' '.join(words)
+
+    def baseform_document(self, item):
+        item['contents'] = self.baseform_contents(item.get('contents'))
+        return item
 
     def search(self, words, expand_words=True):
         """
@@ -293,7 +307,7 @@ class RFSearchGoogleAPI(RFSearch):
         if expand_words:
             words = self.combine_expanded(self.word_expander(words))
 
-        query = self.words_to_query(words)
+        query = self.format_query(words)
         while len(query) > 2500:
             words.pop()
             query = ' '.join(words)
@@ -303,7 +317,9 @@ class RFSearchGoogleAPI(RFSearch):
         if self.search_cache:
             cache_hit = self.search_cache.get_json(query)
             if cache_hit:
+                log.info('Search cache hit')
                 return cache_hit
+            log.info('Query not found from search cache')
 
         res = self.search_service.cse().list(
             q=query,
@@ -356,7 +372,7 @@ class RFSearchGoogleAPI(RFSearch):
 
 class RFSearchGoogleUI(RFSearch):
     """
-    Relevance-feedback search using Google Custom Search.
+    Relevance-feedback search using Google Custom Search. Outdated.
     """
 
     def __init__(self, **kwargs):
@@ -428,9 +444,11 @@ class RFSearchElastic(RFSearch):
         log.info('Query: {query}'.format(query=query))
 
         if self.search_cache:
-            cache_hit = self.search_cache.get_json(words)
+            cache_hit = self.search_cache.get_json(query)
             if cache_hit:
+                log.info('Search cache hit')
                 return cache_hit
+            log.info('Query not found from search cache')
 
         # Make search
         res = self.es.search(index=self.es_index, body={"size": 100, "query": {"query_string": {"query": query}}})
