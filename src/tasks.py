@@ -228,7 +228,7 @@ def refine_words(words, frontend_query, searcher):
                 if weight_in_topic < WEIGHT_THRESHOLD:
                     continue
 
-                weight = topic_weight * float(weight_in_topic) * 50
+                weight = topic_weight * float(weight_in_topic) * 65
 
                 # Match word to existing expanded words in a non-robust way:
                 for existing in new_word_weights.keys():
