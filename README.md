@@ -24,3 +24,12 @@ docker-compose build --build-arg 'REACT_APP_BACKEND=http://localhost:5000' front
 docker-compose up -d
 ```
 
+To deploy with several worker and prerender instances: (for docker version < 3.0)
+
+```
+docker-compose build --build-arg 'REACT_APP_BACKEND=http://localhost:5000' frontend
+docker-compose up -d
+docker-compose scale worker=3 prerender=3
+```
+
+ 

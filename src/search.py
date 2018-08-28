@@ -107,6 +107,7 @@ class RFSearch:
                 log.info('Baseforming content from URL: {url}'.format(len=len(page_content), url=url))
                 page_content = self.baseform_contents(page_content)
                 log.info('Baseformed content length: {len} characters from URL: {url}'.format(len=len(page_content), url=url))
+
             self.scrape_cache.set_value(url, page_content)
         else:
             log.warning('Unable to scrape any content for URL: %s' % url)
@@ -164,7 +165,7 @@ class TopicModeler:
 
         n_topics = n_topics or 1 + round(math.sqrt(len(sample)))
 
-        self.model = lda.LDA(n_topics=n_topics, n_iter=2000, random_state=1)
+        self.model = lda.LDA(n_topics=n_topics, n_iter=1200, random_state=1)
         self.model.fit(X)
 
         n_top_words = 10
@@ -308,7 +309,7 @@ class RFSearchGoogleAPI(RFSearch):
             words = self.combine_expanded(self.word_expander(words))
 
         query = self.format_query(words)
-        while len(query) > 2500:
+        while len(query) >= 2048:  # TODO: Use POST to get bigger query
             words.pop()
             query = ' '.join(words)
 

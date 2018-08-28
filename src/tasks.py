@@ -63,8 +63,10 @@ search_cache_elastic = Cache(REDIS_HOST, db=2)
 
 try:
     topic_model = joblib.load('topics/topic_model.pkl')
+    log.info('Loaded topic model from pickle file.')
 except FileNotFoundError:
     topic_model = None
+    log.warning('No previously created topic model found.')
 
 searcher_google = RFSearchGoogleAPI(APIKEY,
                                     stopwords=STOP_WORDS,
@@ -195,6 +197,7 @@ def refine_words(words, frontend_query, searcher):
     """
     Refine the search query based on user feedback (thumbs up and down)
     """
+    WEIGHT_THRESHOLD = 0.0001
 
     log.info('Refine words got initial words: {}'.format(words))
 
@@ -219,9 +222,13 @@ def refine_words(words, frontend_query, searcher):
 
         # Loop through topics and their words
         for topic, topic_weight in enumerate(topics):
+            if topic_weight < WEIGHT_THRESHOLD:
+                continue
             for word, weight_in_topic in topic_words[topic]:
+                if weight_in_topic < WEIGHT_THRESHOLD:
+                    continue
+
                 weight = topic_weight * float(weight_in_topic) * 50
-                log.debug('Topic %s, word %s: %.10f -> %.10f' % (topic, word, weight_in_topic, weight))
 
                 # Match word to existing expanded words in a non-robust way:
                 for existing in new_word_weights.keys():
