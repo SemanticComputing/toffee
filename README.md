@@ -17,7 +17,7 @@ docker-compose -f docker-compose-train.yml up
 
 ## Running locally
 
-Add a file named `.env` to the repository root with `API_KEY=` and the Google search API key.
+Add a file named `.env` to the repository root with `API_KEY=` and the Google search API key. The `REACT_APP_BACKEND` should point to the `web` service address at the hosting server.
 
 ```
 docker-compose build --build-arg 'REACT_APP_BACKEND=http://localhost:5000' frontend
