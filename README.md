@@ -1,5 +1,10 @@
 # Toffee -- Topical Relevance Feedback Search
 
+Iterative relevance feedback search using topic modeling and user feedback to guide the search towards the topics of interest. 
+
+More details can be found in:
+> Mikko Koho, Erkki Heino, Arttu Oksanen and Eero Hyvönen: Toffee - Semantic Media Search Using Topic Modeling and Relevance Feedback. Proceedings of the ISWC 2018 Posters & Demonstrations, Industry and Blue Sky Ideas Tracks, CEUR Workshop Proceedings, Monterey, California, USA, October, 2018. Vol 2180. [Pre-print PDF](https://seco.cs.aalto.fi/publications/2018/koho-et-al-toffee-demo-2018.pdf)
+
 ## Requirements
 
 - Hades for news corpus index in elasticsearch: https://github.com/SemanticComputing/hades
