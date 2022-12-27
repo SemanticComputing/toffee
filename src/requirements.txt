@@ -8,7 +8,7 @@ numpy==1.13.3
 scipy==1.0.0
 scikit-learn==0.19.1
 Flask-SocketIO==2.9.2
-setuptools==38.4.0
+setuptools==65.5.1
 eventlet==0.21.0
 redis==2.10.6
 celery==4.1.0
